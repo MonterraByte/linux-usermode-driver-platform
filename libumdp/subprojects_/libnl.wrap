@@ -1,0 +1,7 @@
+[wrap-git]
+url = https://github.com/thom311/libnl.git
+revision = libnl3_5_0
+patch_directory = 'libnl'
+
+[provide]
+dependency_names = 'libnl-3.0', 'libnl-genl-3.0'
