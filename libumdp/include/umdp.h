@@ -1,4 +1,6 @@
-#pragma once
+#ifndef UMDP_H
+#define UMDP_H
+
 #ifdef BUILDING_UMDP
     #define UMDP_PUBLIC __attribute__ ((visibility ("default")))
 #else
@@ -19,3 +21,5 @@ UMDP_PUBLIC void umdp_echo(umdp_connection* connection, char* string);
 #ifdef __cplusplus
 }
 #endif
+
+#endif  // UMDP_H

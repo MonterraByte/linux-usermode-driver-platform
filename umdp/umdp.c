@@ -16,13 +16,6 @@ enum {
 };
 #define UMDP_ATTR_MAX (__UMDP_ATTR_MAX - 1)
 
-/* attribute policy */
-static struct nla_policy umdp_genl_policy[UMDP_ATTR_MAX + 1] = {
-    [UMDP_ATTR_MSG] = {
-        .type = NLA_NUL_STRING,
-    },
-};
-
 /* commands */
 enum {
     UMDP_CMD_UNSPEC = 0,
@@ -30,6 +23,13 @@ enum {
     __UMDP_CMD_MAX,
 };
 #define UMDP_CMD_MAX (__UMDP_CMD_MAX - 1)
+
+/* attribute policy */
+static struct nla_policy umdp_genl_policy[UMDP_ATTR_MAX + 1] = {
+    [UMDP_ATTR_MSG] = {
+        .type = NLA_NUL_STRING,
+    },
+};
 
 static int umdp_echo(struct sk_buff* skb, struct genl_info* info);
 
@@ -56,10 +56,58 @@ static struct genl_family umdp_genl_family = {
 
 /* UMDP_CMD_ECHO handler */
 static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
-    int msglen = genlmsg_len(info->genlhdr);
-    char* msg = genlmsg_data(info->genlhdr);
+    printk(KERN_ALERT "umdp_echo handler start\n");
+    umdp_dump(info);
 
-    struct sk_buff* reply = genlmsg_new(NLMSG_HDRLEN + GENL_HDRLEN + msglen, GFP_KERNEL);
+    /*struct nlattr* attributes[UMDP_ATTR_MAX + 1];
+    if (genlmsg_parse(info->nlhdr, &umdp_genl_family, attributes, UMDP_ATTR_MAX, umdp_genl_policy, NULL) != 0) {
+        printk(KERN_ALERT "[umdp] failed to parse attributes\n"); // TODO
+        return -1;
+    }*/
+
+    printk(KERN_ALERT "info->nlhdr: %p\n", info->nlhdr);
+    printk(KERN_ALERT "info->genlhdr: %p\n", info->genlhdr);
+    printk(KERN_ALERT "info->attrs: %p\n", info->attrs);
+
+    struct nlattr** attributes = info->attrs;
+    struct nlattr* msg_attr = NULL;
+
+    int i;
+    for (i = 0; i < UMDP_ATTR_MAX + 1; i++) {
+        if (attributes[i] == NULL) {
+            printk(KERN_ALERT "Attribute %d was null\n", i);
+            continue;
+        }
+
+        printk(KERN_ALERT "attributes[%d]: %p\n", i, attributes[i]);
+
+        printk(KERN_ALERT "Attribute %d has type %d and length %d\n", i, attributes[i]->nla_type, attributes[i]->nla_len);
+        if (attributes[i]->nla_type == UMDP_ATTR_MSG) {
+            printk(KERN_ALERT "Found message attribute\n");
+            msg_attr = attributes[i];
+            break;
+        }
+    }
+
+    if (msg_attr == NULL) {
+        printk(KERN_ALERT "Did not find message attribute\n");
+        return -1;
+    }
+
+    char* message_start = nla_data(msg_attr); //(char*) (msg_attr + (size_t) NLA_HDRLEN);
+    int message_length = msg_attr->nla_len - NLA_HDRLEN;
+
+    printk(KERN_ALERT "message_start: %p\n", message_start);
+    printk(KERN_ALERT "message_length: %d\n", message_length);
+    printk(KERN_ALERT "nla_len: %d\n", nla_len(msg_attr));
+
+    for (i = 0; i < message_length; i++) {
+        printk(KERN_ALERT "message_start[%d]: %c\n", i, message_start[i]);
+    }
+
+    printk(KERN_ALERT "It said: %s\n", message_start);
+
+    struct sk_buff* reply = genlmsg_new(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(message_length), GFP_KERNEL);
     if (reply == NULL) {
         printk(KERN_ALERT "[umdp] Failed to allocate buffer for response\n");
         return -ENOMEM;
@@ -72,7 +120,7 @@ static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
         return -EINVAL;  // why EINVAL?
     }
 
-    int ret = nla_put_string(reply, UMDP_ATTR_MSG, msg);
+    int ret = nla_put_string(reply, UMDP_ATTR_MSG, message_start);
     if (ret != 0) {
         // TODO FAILURE
         printk(KERN_ALERT "[umdp] failed to put string\n"); // TODO
@@ -91,7 +139,14 @@ static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
 }
 
 static int umdp_init(void) {
-    printk(KERN_ALERT "Hello, world\n");
+    printk(KERN_ALERT "Hello, world\n\n");
+    printk(KERN_ALERT "sizeof(struct nlmsghdr): %lu\n", sizeof(struct nlmsghdr));
+    printk(KERN_ALERT "NLMSG_HDRLEN: %d\n\n", NLMSG_HDRLEN);
+    printk(KERN_ALERT "sizeof(struct genlmsghdr): %lu\n", sizeof(struct genlmsghdr));
+    printk(KERN_ALERT "GENL_HDRLEN: %lu\n\n", GENL_HDRLEN);
+    printk(KERN_ALERT "sizeof(struct nlattr): %lu\n", sizeof(struct nlattr));
+    printk(KERN_ALERT "NLA_HDRLEN: %d\n\n", NLA_HDRLEN);
+
 
     int ret = genl_register_family(&umdp_genl_family);
     if (ret != 0) {
@@ -99,7 +154,7 @@ static int umdp_init(void) {
         return 1;
     }
 
-    printk(KERN_ALERT "Registered netlink kernel family\n");
+    printk(KERN_ALERT "Registered netlink kernel family (id: %d)\n", umdp_genl_family.id);
     return 0;
 }
 

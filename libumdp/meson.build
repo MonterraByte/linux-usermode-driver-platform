@@ -10,7 +10,7 @@ genl_dep = dependency('libnl-genl-3.0', version: '>=3.5.0')
 lib_args = ['-DBUILDING_UMDP']
 
 incdir = include_directories('include')
-umdp_lib = library('umdp', 'src/umdp.c',
+umdp_lib = library('umdp', 'src/umdp.c', 'src/handlers.c',
   c_args: lib_args,
   include_directories: incdir,
   dependencies: [nl_dep, genl_dep],

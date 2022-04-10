@@ -9,7 +9,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    sleep(20);
+    //sleep(20);
 
     umdp_connection* connection = umdp_connect();
     if (connection == NULL) {
@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    umdp_echo(connection, "Hello World!");
+    //umdp_echo(connection, "Hello World!");
     umdp_echo(connection, "Hello World number 2!");
     /*char* reply = umdp_echo(connection, "Hello World!");
     if (reply == NULL) {

@@ -1,6 +1,5 @@
 #include "umdp.h"
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,14 +8,8 @@
 #include <netlink/genl/mngt.h>
 #include <netlink/socket.h>
 
-#define UMDP_GENL_NAME "UMDP"
-
-enum {
-    UMDP_ATTR_UNSPEC = 0,
-    UMDP_ATTR_MSG = 1,
-    __UMDP_ATTR_MAX,
-};
-#define UMDP_ATTR_MAX (__UMDP_ATTR_MAX - 1)
+#include "protocol.h"
+#include "handlers.h"
 
 static struct nla_policy umdp_policy[UMDP_ATTR_MAX + 1] = {
     [UMDP_ATTR_MSG] =
@@ -25,37 +18,11 @@ static struct nla_policy umdp_policy[UMDP_ATTR_MAX + 1] = {
         },
 };
 
-enum {
-    UMDP_CMD_UNSPEC = 0,
-    UMDP_CMD_ECHO = 1,
-    __UMDP_CMD_MAX,
-};
-#define UMDP_CMD_MAX (__UMDP_CMD_MAX - 1)
-
-static int umdp_echo_handler(struct nl_cache_ops* _unused, struct genl_cmd* cmd, struct genl_info* info, void* arg) {
-    assert(cmd->c_id == UMDP_CMD_ECHO);
-    assert(info->genlhdr->cmd == UMDP_CMD_ECHO);
-
-    if (arg == NULL) {
-        return 0;
-    }
-    char** out = arg;
-
-    size_t length = genlmsg_len(info->genlhdr);
-    *out = malloc(length);
-    if (*out == NULL) {
-        return -1;  // ENOMEM ?
-    }
-
-    memcpy(*out, genlmsg_data(info->genlhdr), length);
-    return 0;
-}
-
 static struct genl_cmd umdp_cmds[] = {
     {
         .c_id = UMDP_CMD_ECHO,
         .c_name = "UMDP_CMD_ECHO",
-        .c_maxattr = 1,
+        .c_maxattr = UMDP_ATTR_MAX,
         .c_attr_policy = umdp_policy,
         .c_msg_parser = umdp_echo_handler,
     },
@@ -72,6 +39,12 @@ struct umdp_connection {
 };
 
 umdp_connection* umdp_connect() {
+    int ret = genl_register_family(&umdp_family);
+    if (ret != 0 && ret != -NLE_EXIST) {
+        printf("Failed to register family: %d\n", ret);
+        return NULL;
+    }
+
     umdp_connection* connection = malloc(sizeof(umdp_connection));
     if (connection == NULL) {
         return NULL;
@@ -115,41 +88,48 @@ void umdp_destroy(umdp_connection* connection) {
 void umdp_echo(umdp_connection* connection, char* string) {
     size_t string_length = strlen(string) + 1;
 
-    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + string_length);
+    struct nl_msg* msg = nlmsg_alloc();// nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(string_length));
     if (msg == NULL) {
         return;  // NULL;
     }
 
-    void* user_header = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, UMDP_CMD_ECHO, 1);
+    void* user_header = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, UMDP_CMD_ECHO, UMDP_GENL_VERSION);
     if (user_header == NULL) {
         return;  // NULL;
     }
 
-    void* msg_data = genlmsg_data(genlmsg_hdr(nlmsg_hdr(msg)));
-    assert(user_header == msg_data);
+    //void* msg_data = genlmsg_data(genlmsg_hdr(nlmsg_hdr(msg)));
+    //assert(user_header == msg_data);
 
-    nlmsg_append(msg, string, string_length, 0);
     //memcpy(msg_data, string, string_length);
+    //nlmsg_append(msg, string, string_length, 0);
+    if (nla_put_string(msg, UMDP_ATTR_MSG, string) != 0) {
+        return;
+    }
 
     printf("String length: %ld\n", string_length);
     printf("Message length: %d\n", genlmsg_len(genlmsg_hdr(nlmsg_hdr(msg))));
-    assert((size_t) genlmsg_len(genlmsg_hdr(nlmsg_hdr(msg))) == string_length);
 
     char* reply = NULL;
     if (nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, &reply) != 0) {
         return;
     }
 
-    printf("Sending message\n");
-    if (nl_send_auto(connection->socket, msg) != 0) {
+    printf("Sending message (family %d)\n", umdp_family.o_id /*connection->family*/);
+    if (nl_send_auto(connection->socket, msg) < 0) {
         printf("Fail sending\n");
         return;
     }
     nlmsg_free(msg);
 
     printf("Waiting for response\n");
-    if (nl_recvmsgs_default(connection->socket) != 0) {
-        printf("Fail receiving\n");
+    int ret;
+    if ((ret = nl_recvmsgs_default(connection->socket)) != 0) {
+        printf("Fail receiving (returned %d)\n", ret);
+        //return;
+    }
+    if (reply == NULL) {
+        printf("reply was NULL\n");
         return;
     }
     printf("%s\n", reply);
