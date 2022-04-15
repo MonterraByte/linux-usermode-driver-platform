@@ -1,0 +1,2 @@
+option('disable_error_printing', type: 'boolean', value: false, description: 'Disables the printing of errors to stderr')
+option('examples', type: 'boolean', value: false, description: 'Build examples')

@@ -5,3 +5,4 @@
 .*.cmd
 Module.symvers
 modules.order
+libumdp/build

@@ -6,13 +6,25 @@ This is an academic project.
 
 ## Requirements
 
+### Kernel module
+
 * GCC, Make, and other build dependencies of the Linux kernel
 * The kernel headers for the kernel you're using
 * DKMS (optional)
 
+### Library
+
+* A C11 compiler toolchain
+* [Meson](https://mesonbuild.com)
+
 ## Building
 
-You can invoke `make` directly to build the module.
+### Kernel module
+
+You can invoke `make` directly to build the module:
+
+    $ cd umdp
+    $ make
 
 Alternatively, DKMS can be used to build and install it:
 
@@ -20,8 +32,28 @@ Alternatively, DKMS can be used to build and install it:
     # dkms build umdp/0.1.0
     # dkms install umdp/0.1.0
 
+### Library
+
+The library can be built using Meson:
+
+    $ cd libumdp
+    $ meson setup build
+    $ meson compile -C build
+
+To install it, use:
+
+    # meson install -C build
+
+Meson will install the library to `/usr/local/`. To install it to a different location, use the `--prefix` flag.
+
+It can also be used (without requiring installation) as a Meson subproject.
+
 ## Usage
 
 Load the module with:
 
     # modprobe umdp
+
+Alternatively, if not installed, it can be loaded directly with:
+
+    # insmod umdp.ko
