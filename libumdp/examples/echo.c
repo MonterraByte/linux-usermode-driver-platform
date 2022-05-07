@@ -7,7 +7,9 @@ int main(int argc, char* argv[]) {
     char* message = "";
     if (argc > 2) {
         fprintf(stderr, "USAGE: %s message\n", argv[0]);
-    } else if (argc == 2) {
+        return 1;
+    }
+    if (argc == 2) {
         message = argv[1];
     }
 
