@@ -45,4 +45,6 @@ pkg_mod.generate(
 if get_option('examples')
   echo_exe = executable('echo', 'examples/echo.c',
     dependencies: umdp_dep)
+  devio_exe = executable('devio', 'examples/devio.c',
+        dependencies: umdp_dep)
 endif
