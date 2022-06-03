@@ -1,5 +1,7 @@
 #include <linux/init.h>
+#include <linux/ioport.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <net/genetlink.h>
 #include <net/netlink.h>
 
@@ -9,6 +11,9 @@ MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
 
 #define UMDP_GENL_NAME "UMDP"
 #define UMDP_GENL_VERSION 1
+
+#define UMDP_DEVICE_NAME "umdp"
+#define UMDP_MAX_PORT_ALLOCATIONS 16
 
 /* attributes */
 enum {
@@ -28,6 +33,8 @@ enum {
     UMDP_CMD_ECHO = 1,
     UMDP_CMD_DEVIO_READ = 2,
     UMDP_CMD_DEVIO_WRITE = 3,
+    UMDP_CMD_DEVIO_REQUEST = 4,
+    UMDP_CMD_DEVIO_RELEASE = 5,
     __UMDP_CMD_MAX,
 };
 #define UMDP_CMD_MAX (__UMDP_CMD_MAX - 1)
@@ -62,6 +69,8 @@ static struct nla_policy umdp_genl_devio_policy[UMDP_ATTR_MAX + 1] = {
 static int umdp_echo(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info);
+static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info);
+static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info);
 
 /* operation definition */
 static const struct genl_ops umdp_genl_ops[] = {
@@ -84,6 +93,20 @@ static const struct genl_ops umdp_genl_ops[] = {
         .flags = 0,
         .policy = umdp_genl_devio_policy,
         .doit = umdp_devio_write,
+        .dumpit = NULL,
+    },
+    {
+        .cmd = UMDP_CMD_DEVIO_REQUEST,
+        .flags = 0,
+        .policy = umdp_genl_devio_policy,
+        .doit = umdp_devio_request,
+        .dumpit = NULL,
+    },
+    {
+        .cmd = UMDP_CMD_DEVIO_RELEASE,
+        .flags = 0,
+        .policy = umdp_genl_devio_policy,
+        .doit = umdp_devio_release,
         .dumpit = NULL,
     },
 };
@@ -153,6 +176,23 @@ static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
     return 0;
 }
 
+struct devio_data {
+    u64 allocated_ports[UMDP_MAX_PORT_ALLOCATIONS];
+    size_t allocated_port_count;
+};
+static struct devio_data devio_data;
+DEFINE_MUTEX(devio_data_mutex);
+
+static size_t umdp_devio_find_allocated_port_index(u64 port) {
+    size_t i;
+    for (i = 0; i < devio_data.allocated_port_count; i++) {
+        if (devio_data.allocated_ports[i] == port) {
+            return i;
+        }
+    }
+    return SIZE_MAX;
+}
+
 static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
     printk(KERN_DEBUG "umdp: received device IO read request\n");
 
@@ -162,6 +202,17 @@ static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
         return -EINVAL;
     }
     u64 port = *(u64*) nla_data(port_attr);
+
+    mutex_lock(&devio_data_mutex);
+
+    size_t port_index = umdp_devio_find_allocated_port_index(port);
+    if (port_index == SIZE_MAX) {
+        mutex_unlock(&devio_data_mutex);
+        printk(KERN_ERR "umdp: port %llu isn't registered, so it can't be read from\n", port);
+        return -EPERM;
+    }
+
+    mutex_unlock(&devio_data_mutex);
 
     struct nlattr* type_attr = find_attribute(info->attrs, UMDP_ATTR_U8);
     if (type_attr == NULL) {
@@ -250,6 +301,17 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
     }
     u64 port = *((u64*) nla_data(port_attr));
 
+    mutex_lock(&devio_data_mutex);
+
+    size_t port_index = umdp_devio_find_allocated_port_index(port);
+    if (port_index == SIZE_MAX) {
+        mutex_unlock(&devio_data_mutex);
+        printk(KERN_ERR "umdp: port %llu isn't registered, so it can't be written to\n", port);
+        return -EPERM;
+    }
+
+    mutex_unlock(&devio_data_mutex);
+
     int i;
     for (i = 0; i < UMDP_ATTR_MAX + 1; i++) {
         if (info->attrs[i] == NULL) {
@@ -284,7 +346,72 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
     return -EINVAL;
 }
 
+static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
+    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
+    if (irq_attr == NULL) {
+        printk(KERN_ERR "umdp: invalid IO port subscription request: port attribute is missing\n");
+        return -EINVAL;
+    }
+    u64 port = *((u64*) nla_data(irq_attr));
+
+    mutex_lock(&devio_data_mutex);
+
+    if (umdp_devio_find_allocated_port_index(port) != SIZE_MAX) {
+        // already allocated
+        mutex_unlock(&devio_data_mutex);
+        return 0;
+    }
+
+    if (devio_data.allocated_port_count == UMDP_MAX_PORT_ALLOCATIONS) {
+        mutex_unlock(&devio_data_mutex);
+        printk(KERN_ERR "umdp: reached port allocation limit, cannot register another one\n");
+        return -EBUSY;
+    }
+
+    if (request_region(port, 1, UMDP_DEVICE_NAME) == NULL) {
+        mutex_unlock(&devio_data_mutex);
+        printk(KERN_ERR "umdp: failed to request port %llu, it's currently unavailable\n", port);
+        return -EBUSY;
+    }
+
+    devio_data.allocated_port_count++;
+    devio_data.allocated_ports[devio_data.allocated_port_count - 1] = port;
+
+    mutex_unlock(&devio_data_mutex);
+    return 0;
+}
+
+static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
+    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
+    if (irq_attr == NULL) {
+        printk(KERN_ERR "umdp: invalid IO port release request: port attribute is missing\n");
+        return -EINVAL;
+    }
+    u64 port = *((u64*) nla_data(irq_attr));
+
+    mutex_lock(&devio_data_mutex);
+
+    size_t port_index = umdp_devio_find_allocated_port_index(port);
+    if (port_index == SIZE_MAX) {
+        mutex_unlock(&devio_data_mutex);
+        printk(KERN_ERR "umdp: port %llu isn't registered, so it cannot be unregistered\n", port);
+        return -ENOENT;
+    }
+
+    devio_data.allocated_port_count--;
+    size_t i;
+    for (i = port_index; i < devio_data.allocated_port_count; i++) {
+        devio_data.allocated_ports[i] = devio_data.allocated_ports[i+1];
+    }
+
+    release_region(port, 1);
+    mutex_unlock(&devio_data_mutex);
+    return 0;
+}
+
 static int umdp_init(void) {
+    devio_data.allocated_port_count = 0;
+
     int ret = genl_register_family(&umdp_genl_family);
     if (ret != 0) {
         printk(KERN_ERR "umdp: Failed to register netlink family\n");
@@ -299,10 +426,18 @@ static void umdp_exit(void) {
     int ret = genl_unregister_family(&umdp_genl_family);
     if (ret != 0) {
         printk(KERN_ERR "umdp: Failed to unregister netlink family\n");
-        return;
+    } else {
+        printk(KERN_INFO "umdp: Unregistered netlink family\n");
     }
 
-    printk(KERN_INFO "umdp: Unregistered netlink family\n");
+    mutex_lock(&devio_data_mutex);
+
+    size_t i;
+    for (i = 0; i < devio_data.allocated_port_count; i++) {
+        release_region(devio_data.allocated_ports[i], 1);
+    }
+
+    mutex_unlock(&devio_data_mutex);
 }
 
 module_init(umdp_init);
