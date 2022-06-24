@@ -1,7 +1,10 @@
+//#include <asm/signal.h>
 #include <linux/init.h>
+#include <linux/interrupt.h>
 #include <linux/ioport.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/workqueue.h>
 #include <net/genetlink.h>
 #include <net/netlink.h>
 
@@ -14,10 +17,12 @@ MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
 
 #define UMDP_DEVICE_NAME "umdp"
 #define UMDP_MAX_PORT_ALLOCATIONS 16
+#define UMDP_MAX_IRQ_SUBSCRIPTIONS 16
+#define UMDP_WORKQUEUE_NAME "umdp_wq"
 
 /* attributes */
 enum {
-    UMDP_ATTR_UNSPEC = 0,
+    UMDP_ATTR_UNSPEC __attribute__((unused)) = 0,
     UMDP_ATTR_MSG = 1,
     UMDP_ATTR_U8 = 2,
     UMDP_ATTR_U16 = 3,
@@ -29,12 +34,15 @@ enum {
 
 /* commands */
 enum {
-    UMDP_CMD_UNSPEC = 0,
+    UMDP_CMD_UNSPEC __attribute__((unused)) = 0,
     UMDP_CMD_ECHO = 1,
     UMDP_CMD_DEVIO_READ = 2,
     UMDP_CMD_DEVIO_WRITE = 3,
     UMDP_CMD_DEVIO_REQUEST = 4,
     UMDP_CMD_DEVIO_RELEASE = 5,
+    UMDP_CMD_INTERRUPT_NOTIFICATION = 6,
+    UMDP_CMD_INTERRUPT_SUBSCRIBE = 7,
+    UMDP_CMD_INTERRUPT_UNSUBSCRIBE = 8,
     __UMDP_CMD_MAX,
 };
 #define UMDP_CMD_MAX (__UMDP_CMD_MAX - 1)
@@ -66,11 +74,21 @@ static struct nla_policy umdp_genl_devio_policy[UMDP_ATTR_MAX + 1] = {
         },
 };
 
+static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_MAX + 1] = {
+    [UMDP_ATTR_U32] =
+        {
+            .type = NLA_U32,
+        },
+};
+
 static int umdp_echo(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info);
+static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info);
+static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* info);
+static int umdp_interrupt_notification(struct sk_buff* skb, struct genl_info* info) { return 0; }
 
 /* operation definition */
 static const struct genl_ops umdp_genl_ops[] = {
@@ -83,14 +101,14 @@ static const struct genl_ops umdp_genl_ops[] = {
     },
     {
         .cmd = UMDP_CMD_DEVIO_READ,
-        .flags = 0,
+        .flags = 0,  // TODO: maybe GENL_ADMIN_PERM?
         .policy = umdp_genl_devio_policy,
         .doit = umdp_devio_read,
         .dumpit = NULL,
     },
     {
         .cmd = UMDP_CMD_DEVIO_WRITE,
-        .flags = 0,
+        .flags = 0,  // TODO: maybe GENL_ADMIN_PERM?
         .policy = umdp_genl_devio_policy,
         .doit = umdp_devio_write,
         .dumpit = NULL,
@@ -109,6 +127,29 @@ static const struct genl_ops umdp_genl_ops[] = {
         .doit = umdp_devio_release,
         .dumpit = NULL,
     },
+    {
+        .cmd = UMDP_CMD_INTERRUPT_NOTIFICATION,
+        .flags = 0,
+        .policy = umdp_genl_interrupt_policy,
+        //.doit = NULL,
+        .doit = umdp_interrupt_notification,
+        .dumpit = NULL,
+    },
+    {
+        .cmd = UMDP_CMD_INTERRUPT_SUBSCRIBE,
+        .flags = 0,
+        .policy = umdp_genl_interrupt_policy,
+        .doit = umdp_interrupt_subscribe,
+        .dumpit = NULL,
+    },
+    {
+        .cmd = UMDP_CMD_INTERRUPT_UNSUBSCRIBE,
+        .flags = 0,
+        .policy = umdp_genl_interrupt_policy,
+        .doit = umdp_interrupt_unsubscribe,
+        .dumpit = NULL,
+    },
+
 };
 
 /* family definition */
@@ -369,6 +410,7 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
     }
 
     if (request_region(port, 1, UMDP_DEVICE_NAME) == NULL) {
+        // TODO: if needed "release" the port
         mutex_unlock(&devio_data_mutex);
         printk(KERN_ERR "umdp: failed to request port %llu, it's currently unavailable\n", port);
         return -EBUSY;
@@ -409,12 +451,177 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
     return 0;
 }
 
+struct ih_data {
+    u32 netlink_port_id;
+    struct net* network_namespace;
+    u32 registered_irqs[UMDP_MAX_IRQ_SUBSCRIPTIONS];
+    size_t registered_irq_count;
+
+    u64 interrupt_count;
+    u64 handled_interrupt_count;
+};
+static struct ih_data ih_data;
+DEFINE_MUTEX(ih_data_mutex);
+
+static struct workqueue_struct* ih_workqueue;
+void interrupt_handler_wq(struct work_struct* ws);
+
+struct ih_work_struct {
+    struct work_struct ws;
+    int irq;
+    bool finished;
+};
+static struct ih_work_struct ih_work;
+
+void ih_work_init(struct ih_work_struct* work) {
+    INIT_WORK(&work->ws, interrupt_handler_wq);
+    work->finished = false;
+}
+
+static irqreturn_t interrupt_handler(int irq, void *dev_id) {
+    ih_data.interrupt_count++;
+    if (ih_work.finished) {
+        ih_data.handled_interrupt_count++;
+        ih_work_init(&ih_work);
+        ih_work.irq = irq;
+        queue_work(ih_workqueue, (struct work_struct*) &ih_work);
+    }
+    return IRQ_HANDLED;
+}
+
+void interrupt_handler_wq(struct work_struct* ws) {
+    struct ih_work_struct* work = (struct ih_work_struct*) ws;
+    u32 port_id = ih_data.netlink_port_id;
+    struct net* netns = ih_data.network_namespace;
+
+    struct sk_buff* msg = genlmsg_new(nla_total_size(sizeof(u32)), GFP_KERNEL);
+    if (msg == NULL) {
+        printk(KERN_ERR "umdp: failed to allocate buffer for interrupt message\n");
+        return;
+    }
+
+    void* msg_header = genlmsg_put(msg, port_id, 0, &umdp_genl_family, 0, UMDP_CMD_INTERRUPT_NOTIFICATION);
+    if (msg_header == NULL) {
+        nlmsg_free(msg);
+        printk(KERN_ERR "umdp: failed to add the generic netlink header to the interrupt message\n");
+        return;
+    }
+
+    if (nla_put_u32(msg, UMDP_ATTR_U32, work->irq) != 0) {
+        nlmsg_free(msg);
+        printk(KERN_ERR "umdp: failed to write value to interrupt message (this is a bug)\n");
+        return;
+    }
+
+    genlmsg_end(msg, msg_header);
+    int ret = genlmsg_unicast(netns, msg, port_id);
+    if (ret != 0) {
+        printk(KERN_ERR "umdp: failed to send interrupt message (error code %d)\n", ret);
+        return;
+    }
+
+    printk(KERN_DEBUG "umdp: sent interrupt notification for IRQ %u", work->irq);
+    work->finished = true;
+}
+
+static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info) {
+    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_U32);
+    if (irq_attr == NULL) {
+        printk(KERN_ERR "umdp: invalid interrupt subscription request: IRQ attribute is missing\n");
+        return -EINVAL;
+    }
+    u32 irq = *((u32*) nla_data(irq_attr));
+
+    mutex_lock(&ih_data_mutex);
+
+    size_t i;
+    for (i = 0; i < ih_data.registered_irq_count; i++) {
+        if (ih_data.registered_irqs[i] == irq) {
+            mutex_unlock(&ih_data_mutex);
+            return 0;
+        }
+    }
+
+    if (ih_data.registered_irq_count == UMDP_MAX_IRQ_SUBSCRIPTIONS) {
+        mutex_unlock(&ih_data_mutex);
+        printk(KERN_ERR "umdp: reached interrupt subscription limit, cannot register another one\n");
+        return -EBUSY;
+    }
+
+    int ret = request_irq(irq, interrupt_handler, IRQF_SHARED, UMDP_DEVICE_NAME, &ih_data);
+    if (ret != 0) {
+        mutex_unlock(&ih_data_mutex);
+        printk(KERN_ERR "umdp: IRQ request failed with code %d\n", ret);
+        return ret;
+    }
+
+    ih_data.registered_irq_count++;
+    ih_data.registered_irqs[ih_data.registered_irq_count - 1] = irq;
+    ih_data.netlink_port_id = info->snd_portid;  // TODO: handle multiple clients
+
+    if (ih_data.network_namespace != NULL) {
+        put_net(ih_data.network_namespace);
+    }
+    ih_data.network_namespace = get_net(genl_info_net(info));
+
+    mutex_unlock(&ih_data_mutex);
+    printk(KERN_INFO "umdp: subscribed to IRQ %u\n", irq);
+    printk(KERN_INFO "umdp: client port id: %u\n", info->snd_portid);
+    return 0;
+}
+
+static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* info) {
+    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_U32);
+    if (irq_attr == NULL) {
+        printk(KERN_ERR "umdp: invalid interrupt subscription request: IRQ attribute is missing\n");
+        return -EINVAL;
+    }
+    u32 irq = *((u32*) nla_data(irq_attr));
+
+    mutex_lock(&ih_data_mutex);
+
+    size_t irq_index = SIZE_MAX;
+    size_t i;
+    for (i = 0; i < ih_data.registered_irq_count; i++) {
+        if (ih_data.registered_irqs[i] == irq) {
+            irq_index = i;
+            break;
+        }
+    }
+
+    if (irq_index == SIZE_MAX) {
+        mutex_unlock(&ih_data_mutex);
+        printk(KERN_ERR "umdp: IRQ %u isn't registered, so it cannot be unregistered\n", irq);
+        return -ENOENT;
+    }
+
+    ih_data.registered_irq_count--;
+    for (i = irq_index; i < ih_data.registered_irq_count; i++) {
+        ih_data.registered_irqs[i] = ih_data.registered_irqs[i+1];
+    }
+
+    free_irq(irq, &ih_data);
+    mutex_unlock(&ih_data_mutex);
+    printk(KERN_INFO "umdp: unsubscribed from IRQ %u\n", irq);
+    return 0;
+}
+
 static int umdp_init(void) {
     devio_data.allocated_port_count = 0;
+    ih_data.netlink_port_id = 0;
+    ih_data.registered_irq_count = 0;
+    ih_data.network_namespace = NULL;
+    ih_data.interrupt_count = 0;
+    ih_data.handled_interrupt_count = 0;
+
+    ih_workqueue = alloc_workqueue(UMDP_WORKQUEUE_NAME, 0, 0);
+    //ih_work_init(&ih_work);
+    ih_work.finished = true;
+    //INIT_WORK(&ih_workqueue, (void (*)(void *)) short_do_tasklet, NULL);
 
     int ret = genl_register_family(&umdp_genl_family);
     if (ret != 0) {
-        printk(KERN_ERR "umdp: Failed to register netlink family\n");
+        printk(KERN_ERR "umdp: Failed to register netlink family (error code %d)\n", ret);
         return ret;
     }
 
@@ -430,14 +637,32 @@ static void umdp_exit(void) {
         printk(KERN_INFO "umdp: Unregistered netlink family\n");
     }
 
-    mutex_lock(&devio_data_mutex);
+    destroy_workqueue(ih_workqueue);
+
+    mutex_lock(&ih_data_mutex);
 
     size_t i;
+    for (i = 0; i < ih_data.registered_irq_count; i++) {
+        free_irq(ih_data.registered_irqs[i], &ih_data);
+    }
+
+    if (ih_data.network_namespace != NULL) {
+        put_net(ih_data.network_namespace);
+    }
+
+    mutex_unlock(&ih_data_mutex);
+
+    mutex_lock(&devio_data_mutex);
+
+    //size_t i;
     for (i = 0; i < devio_data.allocated_port_count; i++) {
         release_region(devio_data.allocated_ports[i], 1);
     }
 
     mutex_unlock(&devio_data_mutex);
+
+    printk(KERN_INFO "umdp: received a total of %llu interrupts\n", ih_data.interrupt_count);
+    printk(KERN_INFO "umdp: handled a total of %llu interrupts\n", ih_data.handled_interrupt_count);
 }
 
 module_init(umdp_init);

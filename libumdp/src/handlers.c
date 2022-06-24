@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "connection.h"
 #include "error.h"
 #include "protocol.h"
 
@@ -23,11 +24,7 @@ static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
 
 int umdp_echo_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,
     __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
-    if (arg == NULL) {
-        print_err("ignored unexpected echo reply\n");
-        return NL_SKIP;
-    }
-    char** out = arg;
+    umdp_connection* connection = arg;
 
     struct nlattr* msg_attr = find_attribute(info->attrs, UMDP_ATTR_MSG);
     if (msg_attr == NULL) {
@@ -36,22 +33,19 @@ int umdp_echo_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,
     }
 
     size_t message_length = nla_len(msg_attr);
-    *out = malloc(message_length);
-    if (*out == NULL) {
+    connection->received_echo = malloc(message_length);
+    if (connection->received_echo == NULL) {
         print_err("failed to allocate memory\n");
         return NL_STOP;
     }
 
-    memcpy(*out, nla_data(msg_attr), message_length);
-    return NL_STOP;
+    memcpy(connection->received_echo, nla_data(msg_attr), message_length);
+    return NL_SKIP;
 }
 
 int umdp_devio_read_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,
     __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
-    if (arg == NULL) {
-        print_err("ignored unexpected device IO read reply\n");
-        return NL_SKIP;
-    }
+    umdp_connection* connection = arg;
 
     bool found_attribute = false;
     for (int i = 0; i < UMDP_ATTR_MAX + 1; i++) {
@@ -62,20 +56,20 @@ int umdp_devio_read_handler(__attribute__((unused)) struct nl_cache_ops* _cache_
 
         switch (nla_type(attr)) {
             case UMDP_ATTR_U8: {
-                uint8_t* out = arg;
-                *out = *((uint8_t*) nla_data(attr));
+                connection->received_devio_value.type = DEVIO_VALUE_U8;
+                connection->received_devio_value.u8 = *((uint8_t*) nla_data(attr));
                 found_attribute = true;
                 break;
             }
             case UMDP_ATTR_U16: {
-                uint16_t* out = arg;
-                *out = *((uint16_t*) nla_data(attr));
+                connection->received_devio_value.type = DEVIO_VALUE_U16;
+                connection->received_devio_value.u16 = *((uint16_t*) nla_data(attr));
                 found_attribute = true;
                 break;
             }
             case UMDP_ATTR_U32: {
-                uint32_t* out = arg;
-                *out = *((uint32_t*) nla_data(attr));
+                connection->received_devio_value.type = DEVIO_VALUE_U32;
+                connection->received_devio_value.u32 = *((uint32_t*) nla_data(attr));
                 found_attribute = true;
                 break;
             }
@@ -90,8 +84,23 @@ int umdp_devio_read_handler(__attribute__((unused)) struct nl_cache_ops* _cache_
 
     if (!found_attribute) {
         print_err("received device IO read reply without a value attribute\n");
+    }
+
+    return NL_SKIP;
+}
+
+int umdp_interrupt_handler(__attribute__((unused)) struct nl_cache_ops* _unused, __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
+    umdp_connection* connection = arg;
+
+    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_MSG);
+    if (irq_attr == NULL) {
+        print_err("received an interrupt notification without an IRQ attribute\n");
         return NL_SKIP;
     }
 
-    return NL_STOP;
+    if (!irq_queue_push(&connection->irq_queue, *((uint32_t*) nla_data(irq_attr)))) {
+        print_err("IRQ queue is full, discarding received IRQ");
+    }
+
+    return NL_SKIP;
 }

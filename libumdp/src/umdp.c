@@ -1,6 +1,7 @@
 #include "umdp.h"
 
 #include <errno.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,7 @@
 #include <netlink/genl/mngt.h>
 #include <netlink/socket.h>
 
+#include "connection.h"
 #include "error.h"
 #include "handlers.h"
 #include "protocol.h"
@@ -39,6 +41,13 @@ static struct nla_policy umdp_genl_devio_policy[UMDP_ATTR_MAX + 1] = {
         },
 };
 
+static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_MAX + 1] = {
+    [UMDP_ATTR_U32] =
+        {
+            .type = NLA_U32,
+        },
+};
+
 static struct genl_cmd umdp_cmds[] = {
     {
         .c_id = UMDP_CMD_ECHO,
@@ -60,16 +69,43 @@ static struct genl_cmd umdp_cmds[] = {
         .c_maxattr = UMDP_ATTR_MAX,
         .c_attr_policy = umdp_genl_devio_policy,
     },
+    {
+        .c_id = UMDP_CMD_DEVIO_REQUEST,
+        .c_name = "UMDP_CMD_DEVIO_REQUEST",
+        .c_maxattr = UMDP_ATTR_MAX,
+        .c_attr_policy = umdp_genl_devio_policy,
+    },
+    {
+        .c_id = UMDP_CMD_DEVIO_RELEASE,
+        .c_name = "UMDP_CMD_DEVIO_RELEASE",
+        .c_maxattr = UMDP_ATTR_MAX,
+        .c_attr_policy = umdp_genl_devio_policy,
+    },
+    {
+        .c_id = UMDP_CMD_INTERRUPT_NOTIFICATION,
+        .c_name = "UMDP_CMD_INTERRUPT_NOTIFICATION",
+        .c_maxattr = UMDP_ATTR_MAX,
+        .c_attr_policy = umdp_genl_interrupt_policy,
+        .c_msg_parser = umdp_interrupt_handler,
+    },
+    {
+        .c_id = UMDP_CMD_INTERRUPT_SUBSCRIBE,
+        .c_name = "UMDP_CMD_INTERRUPT_SUBSCRIBE",
+        .c_maxattr = UMDP_ATTR_MAX,
+        .c_attr_policy = umdp_genl_interrupt_policy,
+    },
+    {
+        .c_id = UMDP_CMD_INTERRUPT_UNSUBSCRIBE,
+        .c_name = "UMDP_CMD_INTERRUPT_UNSUBSCRIBE",
+        .c_maxattr = UMDP_ATTR_MAX,
+        .c_attr_policy = umdp_genl_interrupt_policy,
+    },
 };
 
 static struct genl_ops umdp_family = {
     .o_name = UMDP_GENL_NAME,
     .o_cmds = umdp_cmds,
     .o_ncmds = sizeof(umdp_cmds) / sizeof(struct genl_cmd),
-};
-
-struct umdp_connection {
-    struct nl_sock* socket;
 };
 
 umdp_connection* umdp_connect() {
@@ -84,6 +120,7 @@ umdp_connection* umdp_connect() {
         print_err("failed to allocate memory\n");
         return NULL;
     }
+    umdp_connection_init(connection);
 
     connection->socket = nl_socket_alloc();
     if (connection->socket == NULL) {
@@ -91,7 +128,7 @@ umdp_connection* umdp_connect() {
         goto socket_failure;
     }
 
-    ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, NULL);
+    ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, connection);
     if (ret != 0) {
         printf_err("failed to register callback: %s\n", nl_geterror(ret));
         goto failure;
@@ -148,13 +185,6 @@ char* umdp_echo(umdp_connection* connection, char* string) {
         goto msg_failure;
     }
 
-    char* reply = NULL;
-    ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, &reply);
-    if (ret != 0) {
-        printf_err("failed to register callback: %s\n", nl_geterror(ret));
-        goto msg_failure;
-    }
-
     ret = nl_send_auto(connection->socket, msg);
     if (ret < 0) {
         printf_err("failed to send message: %s\n", nl_geterror(ret));
@@ -168,7 +198,7 @@ char* umdp_echo(umdp_connection* connection, char* string) {
         return NULL;
     }
 
-    return reply;
+    return connection->received_echo;
 
 msg_failure:
     nlmsg_free(msg);
@@ -176,8 +206,10 @@ msg_failure:
 }
 
 static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t type, void* out) {
+    connection->received_devio_value.type = DEVIO_VALUE_NONE;
+
     struct nl_msg* msg = nlmsg_alloc_size(
-        NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(uint64_t)) + nla_total_size(sizeof(uint8_t)));
+        NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)) + nla_total_size(sizeof(type)));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
         return ENOMEM;
@@ -205,13 +237,6 @@ static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t t
         return ret;
     }
 
-    ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, out);
-    if (ret != 0) {
-        printf_err("failed to register callback: %s\n", nl_geterror(ret));
-        nlmsg_free(msg);
-        return ret;
-    }
-
     ret = nl_send_auto(connection->socket, msg);
     if (ret < 0) {
         printf_err("failed to send device IO read request: %s\n", nl_geterror(ret));
@@ -220,12 +245,32 @@ static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t t
     }
     nlmsg_free(msg);
 
-    ret = nl_recvmsgs_default(connection->socket);
-    if (ret != 0) {
-        printf_err("failed to receive reply: %s\n", nl_geterror(ret));
-        return ret;
+    while (connection->received_devio_value.type == DEVIO_VALUE_NONE) {
+        ret = nl_recvmsgs_default(connection->socket);
+        if (ret != 0) {
+            printf_err("failed to receive reply: %s\n", nl_geterror(ret));
+            return ret;
+        }
     }
 
+    if ((type == UMDP_ATTR_U8 && connection->received_devio_value.type != DEVIO_VALUE_U8) || (type == UMDP_ATTR_U16 && connection->received_devio_value.type != DEVIO_VALUE_U16) || (type == UMDP_ATTR_U32 && connection->received_devio_value.type != DEVIO_VALUE_U32)) {
+        print_err("received value type does not match the expected type");
+        return -1;
+    }
+
+    switch (type) {
+        case UMDP_ATTR_U8:
+            *((uint8_t*) out) = connection->received_devio_value.u8;
+            break;
+        case UMDP_ATTR_U16:
+            *((uint16_t*) out) = connection->received_devio_value.u16;
+            break;
+        case UMDP_ATTR_U32:
+            *((uint32_t*) out) = connection->received_devio_value.u32;
+            break;
+    }
+
+    connection->received_devio_value.type = DEVIO_VALUE_NONE;
     return 0;
 }
 
@@ -257,8 +302,7 @@ static int umdp_devio_write(umdp_connection* connection, uint64_t port, uint8_t 
             return EINVAL;
     }
 
-    struct nl_msg* msg =
-        nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(uint64_t)) + nla_total_size(value_size));
+    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)) + nla_total_size(value_size));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
         return ENOMEM;
@@ -324,4 +368,135 @@ int umdp_devio_write_u16(umdp_connection* connection, uint64_t port, uint16_t va
 
 int umdp_devio_write_u32(umdp_connection* connection, uint64_t port, uint32_t value) {
     return umdp_devio_write(connection, port, UMDP_ATTR_U32, &value);
+}
+
+int umdp_devio_request(umdp_connection* connection, uint64_t port) {
+    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)));
+    if (msg == NULL) {
+        print_err("failed to allocate memory\n");
+        return ENOMEM;
+    }
+
+    if (genlmsg_put(
+            msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, UMDP_CMD_DEVIO_REQUEST, UMDP_GENL_VERSION)
+        == NULL) {
+        print_err("failed to write netlink headers\n");
+        nlmsg_free(msg);
+        return -NLE_NOMEM;
+    }
+
+    int ret = nla_put_u64(msg, UMDP_ATTR_U64, port);
+    if (ret != 0) {
+        printf_err("failed to write port value: %s\n", nl_geterror(ret));
+        nlmsg_free(msg);
+        return ret;
+    }
+
+    ret = nl_send_auto(connection->socket, msg);
+    nlmsg_free(msg);
+    if (ret < 0) {
+        printf_err("failed to send IO port request: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    ret = nl_wait_for_ack(connection->socket);
+    if (ret != 0) {
+        printf_err("failed to receive ACK: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    return 0;
+}
+
+int umdp_devio_release(umdp_connection* connection, uint64_t port) {
+    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)));
+    if (msg == NULL) {
+        print_err("failed to allocate memory\n");
+        return ENOMEM;
+    }
+
+    if (genlmsg_put(
+            msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, UMDP_CMD_DEVIO_RELEASE, UMDP_GENL_VERSION)
+        == NULL) {
+        print_err("failed to write netlink headers\n");
+        nlmsg_free(msg);
+        return -NLE_NOMEM;
+    }
+
+    int ret = nla_put_u64(msg, UMDP_ATTR_U64, port);
+    if (ret != 0) {
+        printf_err("failed to write port value: %s\n", nl_geterror(ret));
+        nlmsg_free(msg);
+        return ret;
+    }
+
+    ret = nl_send_auto(connection->socket, msg);
+    nlmsg_free(msg);
+    if (ret < 0) {
+        printf_err("failed to send IO port request: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    ret = nl_wait_for_ack(connection->socket);
+    if (ret != 0) {
+        printf_err("failed to receive ACK: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    return 0;
+}
+
+static int umdp_interrupt_subscription_request(umdp_connection* connection, uint32_t irq, uint8_t command) {
+    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(irq)));
+    if (msg == NULL) {
+        print_err("failed to allocate memory\n");
+        return ENOMEM;
+    }
+
+    if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, command, UMDP_GENL_VERSION) == NULL) {
+        print_err("failed to write netlink headers\n");
+        nlmsg_free(msg);
+        return -NLE_NOMEM;
+    }
+
+    int ret = nla_put_u32(msg, UMDP_ATTR_U32, irq);
+    if (ret != 0) {
+        printf_err("failed to write IRQ value: %s\n", nl_geterror(ret));
+        nlmsg_free(msg);
+        return ret;
+    }
+
+    ret = nl_send_auto(connection->socket, msg);
+    nlmsg_free(msg);
+    if (ret < 0) {
+        printf_err("failed to send interrupt subscription request: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    ret = nl_wait_for_ack(connection->socket);
+    if (ret != 0) {
+        printf_err("failed to receive ACK: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    return 0;
+}
+
+int umdp_interrupt_subscribe(umdp_connection* connection, uint32_t irq) {
+    return umdp_interrupt_subscription_request(connection, irq, UMDP_CMD_INTERRUPT_SUBSCRIBE);
+}
+
+int umdp_interrupt_unsubscribe(umdp_connection* connection, uint32_t irq) {
+    return umdp_interrupt_subscription_request(connection, irq, UMDP_CMD_INTERRUPT_UNSUBSCRIBE);
+}
+
+int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out) {
+    while (!irq_queue_pop(&connection->irq_queue, out)) {
+        int ret = nl_recvmsgs_default(connection->socket);
+        if (ret != 0) {
+            printf_err("failed to receive reply: %s\n", nl_geterror(ret));
+            return ret;
+        }
+    }
+    return 0;
 }

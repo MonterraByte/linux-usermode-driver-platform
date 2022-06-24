@@ -39,6 +39,9 @@ UMDP_PUBLIC void umdp_disconnect(umdp_connection* connection);
 UMDP_PUBLIC char* umdp_echo(umdp_connection* connection, char* string);
 
 
+UMDP_PUBLIC int umdp_devio_request(umdp_connection* connection, uint64_t port);
+UMDP_PUBLIC int umdp_devio_release(umdp_connection* connection, uint64_t port);
+
 /// Read a byte from the specified port
 /// \param connection `umdp_connection` to use
 /// \param port Port to read from
@@ -81,6 +84,10 @@ UMDP_PUBLIC int umdp_devio_write_u16(umdp_connection* connection, uint64_t port,
 /// \param value Value to write
 /// \return 0 in case of success, a non-zero value in case of failure
 UMDP_PUBLIC int umdp_devio_write_u32(umdp_connection* connection, uint64_t port, uint32_t value);
+
+UMDP_PUBLIC int umdp_interrupt_subscribe(umdp_connection* connection, uint32_t irq);
+UMDP_PUBLIC int umdp_interrupt_unsubscribe(umdp_connection* connection, uint32_t irq);
+UMDP_PUBLIC int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out);
 
 #ifdef __cplusplus
 }
