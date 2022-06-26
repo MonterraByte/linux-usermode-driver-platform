@@ -31,6 +31,7 @@ int main(int argc, char* argv[]) {
     //}
 
     printf("Disconnecting\n");
+    umdp_interrupt_unsubscribe(connection, 0);
     umdp_disconnect(connection);
     return 0;
 }

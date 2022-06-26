@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <netlink/genl/ctrl.h>
 #include <netlink/genl/genl.h>
 #include <netlink/genl/mngt.h>
 #include <netlink/socket.h>
@@ -146,6 +147,18 @@ umdp_connection* umdp_connect() {
     ret = genl_ops_resolve(connection->socket, &umdp_family);
     if (ret != 0) {
         printf_err("failed to resolve generic netlink family: %s\n", nl_geterror(ret));
+        goto failure;
+    }
+
+    int interrupt_multicast_group = genl_ctrl_resolve_grp(connection->socket, UMDP_GENL_NAME, UMDP_GENL_INTERRUPT_MULTICAST_NAME);
+    if (interrupt_multicast_group < 0) {
+        printf_err("failed to resolve multicast group: %s\n", nl_geterror(interrupt_multicast_group));
+        goto failure;
+    }
+
+    ret = nl_socket_add_membership(connection->socket, interrupt_multicast_group);
+    if (ret != 0) {
+        printf_err("failed to register to multicast group: %s\n", nl_geterror(ret));
         goto failure;
     }
 
@@ -479,6 +492,11 @@ static int umdp_interrupt_subscription_request(umdp_connection* connection, uint
         return ret;
     }
 
+    if (command == UMDP_CMD_INTERRUPT_SUBSCRIBE) {
+        umdp_connection_add_irq(connection, irq);
+    } else {
+        umdp_connection_remove_irq(connection, irq);
+    }
     return 0;
 }
 
