@@ -47,6 +47,7 @@ struct umdp_connection {
 };
 
 void umdp_connection_init(umdp_connection* connection);
+void umdp_connection_destroy(umdp_connection* connection);
 void umdp_connection_add_irq(umdp_connection* connection, uint32_t irq);
 void umdp_connection_remove_irq(umdp_connection* connection, uint32_t irq);
 bool is_subscribed_to_irq(umdp_connection* connection, uint32_t irq);
