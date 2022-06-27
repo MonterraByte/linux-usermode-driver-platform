@@ -2,6 +2,8 @@
 
 #include <stdlib.h>
 
+#include <netlink/socket.h>
+
 #include "error.h"
 
 void irq_queue_init(irq_queue* queue) {
@@ -39,6 +41,12 @@ void umdp_connection_init(umdp_connection* connection) {
     connection->received_echo = NULL;
     connection->received_devio_value.type = DEVIO_VALUE_NONE;
     irq_queue_init(&connection->irq_queue);
+}
+
+void umdp_connection_destroy(umdp_connection* connection) {
+    nl_socket_free(connection->socket);
+    free(connection->subscribed_irqs);
+    free(connection->received_echo);
 }
 
 void umdp_connection_add_irq(umdp_connection* connection, uint32_t irq) {

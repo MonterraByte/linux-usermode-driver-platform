@@ -174,7 +174,7 @@ socket_failure:
 }
 
 void umdp_disconnect(umdp_connection* connection) {
-    nl_socket_free(connection->socket);
+    umdp_connection_destroy(connection);
     free(connection);
 }
 
