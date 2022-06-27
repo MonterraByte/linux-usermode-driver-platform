@@ -18,17 +18,15 @@ int main(int argc, char* argv[]) {
     }
 
     printf("Subscribed to IRQ 0 successfully\n");
-    sleep(1);
     uint32_t irq;
-    //for (int i = 0; i < 10; i++) {
+    while (1) {
         ret = umdp_receive_interrupt(connection, &irq);
         if (ret != 0) {
             fprintf(stderr, "umdp_receive_interrupt returned %d\n", ret);
             return 1;
         }
         printf("IRQ: %d\n", irq);
-    //    sleep(1);
-    //}
+    }
 
     printf("Disconnecting\n");
     umdp_interrupt_unsubscribe(connection, 0);

@@ -1,7 +1,6 @@
 #include "umdp.h"
 
 #include <errno.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,6 +127,9 @@ umdp_connection* umdp_connect() {
         print_err("failed to allocate socket\n");
         goto socket_failure;
     }
+
+    // Disable seq number checks to be able to receive multicast messages
+    nl_socket_disable_seq_check(connection->socket);
 
     ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, connection);
     if (ret != 0) {

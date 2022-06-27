@@ -1,9 +1,9 @@
-//#include <asm/signal.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+//#include <linux/timer.h>
 #include <linux/workqueue.h>
 #include <net/genetlink.h>
 #include <net/netlink.h>
@@ -20,6 +20,7 @@ MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
 #define UMDP_MAX_PORT_ALLOCATIONS 16
 #define UMDP_MAX_IRQ_SUBSCRIPTIONS 16
 #define UMDP_WORKQUEUE_NAME "umdp_wq"
+#define UMDP_WORKER_COUNT 32
 
 /* attributes */
 enum {
@@ -476,22 +477,23 @@ void interrupt_handler_wq(struct work_struct* ws);
 struct ih_work_struct {
     struct work_struct ws;
     int irq;
-    bool ready;
+    bool busy;
 };
-static struct ih_work_struct ih_work;
-
-void ih_work_init(struct ih_work_struct* work) {
-    INIT_WORK(&work->ws, interrupt_handler_wq);
-    work->ready = false;
-}
+static struct ih_work_struct ih_workers[UMDP_WORKER_COUNT];
 
 static irqreturn_t interrupt_handler(int irq, void *dev_id) {
     ih_data.interrupt_count++;
-    if (ih_work.ready) {
-        ih_data.handled_interrupt_count++;
-        ih_work_init(&ih_work);
-        ih_work.irq = irq;
-        queue_work(ih_workqueue, (struct work_struct*) &ih_work);
+    size_t i;
+    for (i = 0; i < UMDP_WORKER_COUNT; i++) {
+        if (!ih_workers[i].busy) {
+            ih_workers[i].busy = true;
+            ih_workers[i].irq = irq;
+            INIT_WORK(&ih_workers[i].ws, interrupt_handler_wq);
+            queue_work(ih_workqueue, (struct work_struct*) &ih_workers[i]);
+
+            ih_data.handled_interrupt_count++;
+            break;
+        }
     }
     return IRQ_HANDLED;
 }
@@ -502,6 +504,7 @@ void interrupt_handler_wq(struct work_struct* ws) {
     struct sk_buff* msg = genlmsg_new(nla_total_size(sizeof(u32)), GFP_KERNEL);
     if (msg == NULL) {
         printk(KERN_ERR "umdp: failed to allocate buffer for interrupt notification\n");
+        work->busy = false;
         return;
     }
 
@@ -509,24 +512,31 @@ void interrupt_handler_wq(struct work_struct* ws) {
     if (msg_header == NULL) {
         nlmsg_free(msg);
         printk(KERN_ERR "umdp: failed to add the generic netlink header to the interrupt notification\n");
+        work->busy = false;
         return;
     }
 
     if (nla_put_u32(msg, UMDP_ATTR_U32, work->irq) != 0) {
         nlmsg_free(msg);
         printk(KERN_ERR "umdp: failed to write value to interrupt notification (this is a bug)\n");
+        work->busy = false;
         return;
     }
 
     genlmsg_end(msg, msg_header);
-    int ret = genlmsg_multicast_allns(&umdp_genl_family, msg, 0, 0, GFP_KERNEL);
-    if (ret != 0) {
+    int ret = genlmsg_multicast(&umdp_genl_family, msg, 0, 0, GFP_KERNEL);
+    if (ret == -ESRCH) {
+        printk(KERN_DEBUG "umdp: tried to send notification for IRQ %d, but no one is listening\n", work->irq);
+        work->busy = false;
+        return;
+    } else if (ret != 0) {
         printk(KERN_ERR "umdp: failed to send interrupt notification (error code %d)\n", ret);
+        work->busy = false;
         return;
     }
 
-    printk(KERN_DEBUG "umdp: sent interrupt notification for IRQ %u", work->irq);
-    work->ready = true;
+    printk(KERN_DEBUG "umdp: sent interrupt notification for IRQ %u\n", work->irq);
+    work->busy = false;
 }
 
 static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info) {
@@ -553,6 +563,7 @@ static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info)
         return -EBUSY;
     }
 
+    // TODO: allow the user to decide if they want IRQF_SHARED
     int ret = request_irq(irq, interrupt_handler, IRQF_SHARED, UMDP_DEVICE_NAME, &ih_data);
     if (ret != 0) {
         mutex_unlock(&ih_data_mutex);
@@ -605,6 +616,22 @@ static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* inf
     return 0;
 }
 
+//void ih_timer_callback(struct timer_list* timer) {
+//    size_t i;
+//    for (i = 0; i < UMDP_WORKER_COUNT; i++) {
+//        if (!ih_workers[i].busy) {
+//            ih_workers[i].busy = true;
+//            ih_workers[i].irq = 0;
+//            INIT_WORK(&ih_workers[i].ws, interrupt_handler_wq);
+//            queue_work(ih_workqueue, (struct work_struct*) &ih_workers[i]);
+//            break;
+//        }
+//    }
+//    mod_timer(timer, jiffies + msecs_to_jiffies(5000));
+//}
+
+//static struct timer_list ih_timer;
+
 static int umdp_init(void) {
     devio_data.allocated_port_count = 0;
     ih_data.registered_irq_count = 0;
@@ -612,15 +639,19 @@ static int umdp_init(void) {
     ih_data.handled_interrupt_count = 0;
 
     ih_workqueue = alloc_workqueue(UMDP_WORKQUEUE_NAME, 0, 0);
-    //ih_work_init(&ih_work);
-    ih_work.ready = true;
-    //INIT_WORK(&ih_workqueue, (void (*)(void *)) short_do_tasklet, NULL);
+    size_t i;
+    for (i = 0; i < UMDP_WORKER_COUNT; i++) {
+        ih_workers[i].busy = false;
+    }
 
     int ret = genl_register_family(&umdp_genl_family);
     if (ret != 0) {
         printk(KERN_ERR "umdp: Failed to register netlink family (error code %d)\n", ret);
         return ret;
     }
+
+    //timer_setup(&ih_timer, ih_timer_callback, 0);
+    //mod_timer(&ih_timer, jiffies + msecs_to_jiffies(5000));
 
     printk(KERN_INFO "umdp: Registered netlink kernel family (id: %d)\n", umdp_genl_family.id);
     return 0;
@@ -634,6 +665,7 @@ static void umdp_exit(void) {
         printk(KERN_INFO "umdp: Unregistered netlink family\n");
     }
 
+    //del_timer_sync(&ih_timer);
     destroy_workqueue(ih_workqueue);
 
     mutex_lock(&ih_data_mutex);
