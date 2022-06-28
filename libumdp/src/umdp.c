@@ -385,24 +385,29 @@ int umdp_devio_write_u32(umdp_connection* connection, uint64_t port, uint32_t va
     return umdp_devio_write(connection, port, UMDP_ATTR_U32, &value);
 }
 
-int umdp_devio_request(umdp_connection* connection, uint64_t port) {
-    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)));
+static int umdp_devio_region_request(umdp_connection* connection, uint64_t start, uint32_t size, uint8_t command) {
+    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(start)) + nla_total_size(sizeof(size)));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
         return ENOMEM;
     }
 
-    if (genlmsg_put(
-            msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, UMDP_CMD_DEVIO_REQUEST, UMDP_GENL_VERSION)
-        == NULL) {
+    if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, command, UMDP_GENL_VERSION) == NULL) {
         print_err("failed to write netlink headers\n");
         nlmsg_free(msg);
         return -NLE_NOMEM;
     }
 
-    int ret = nla_put_u64(msg, UMDP_ATTR_U64, port);
+    int ret = nla_put_u64(msg, UMDP_ATTR_U64, start);
     if (ret != 0) {
-        printf_err("failed to write port value: %s\n", nl_geterror(ret));
+        printf_err("failed to write start value: %s\n", nl_geterror(ret));
+        nlmsg_free(msg);
+        return ret;
+    }
+
+    ret = nla_put_u32(msg, UMDP_ATTR_U32, size);
+    if (ret != 0) {
+        printf_err("failed to write size value: %s\n", nl_geterror(ret));
         nlmsg_free(msg);
         return ret;
     }
@@ -410,7 +415,7 @@ int umdp_devio_request(umdp_connection* connection, uint64_t port) {
     ret = nl_send_auto(connection->socket, msg);
     nlmsg_free(msg);
     if (ret < 0) {
-        printf_err("failed to send IO port request: %s\n", nl_geterror(ret));
+        printf_err("failed to send IO region request: %s\n", nl_geterror(ret));
         return ret;
     }
 
@@ -423,42 +428,12 @@ int umdp_devio_request(umdp_connection* connection, uint64_t port) {
     return 0;
 }
 
-int umdp_devio_release(umdp_connection* connection, uint64_t port) {
-    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)));
-    if (msg == NULL) {
-        print_err("failed to allocate memory\n");
-        return ENOMEM;
-    }
+int umdp_devio_request(umdp_connection* connection, uint64_t start, uint32_t size) {
+    return umdp_devio_region_request(connection, start, size, UMDP_CMD_DEVIO_REQUEST);
+}
 
-    if (genlmsg_put(
-            msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, UMDP_CMD_DEVIO_RELEASE, UMDP_GENL_VERSION)
-        == NULL) {
-        print_err("failed to write netlink headers\n");
-        nlmsg_free(msg);
-        return -NLE_NOMEM;
-    }
-
-    int ret = nla_put_u64(msg, UMDP_ATTR_U64, port);
-    if (ret != 0) {
-        printf_err("failed to write port value: %s\n", nl_geterror(ret));
-        nlmsg_free(msg);
-        return ret;
-    }
-
-    ret = nl_send_auto(connection->socket, msg);
-    nlmsg_free(msg);
-    if (ret < 0) {
-        printf_err("failed to send IO port request: %s\n", nl_geterror(ret));
-        return ret;
-    }
-
-    ret = nl_wait_for_ack(connection->socket);
-    if (ret != 0) {
-        printf_err("failed to receive ACK: %s\n", nl_geterror(ret));
-        return ret;
-    }
-
-    return 0;
+int umdp_devio_release(umdp_connection* connection, uint64_t start, uint32_t size) {
+    return umdp_devio_region_request(connection, start, size, UMDP_CMD_DEVIO_RELEASE);
 }
 
 static int umdp_interrupt_subscription_request(umdp_connection* connection, uint32_t irq, uint8_t command) {

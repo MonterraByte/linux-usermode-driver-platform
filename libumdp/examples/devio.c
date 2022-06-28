@@ -148,6 +148,13 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    int ret = umdp_devio_request(connection, port, 1);
+    if (ret != 0) {
+        fprintf(stderr, "umdp_devio_request returned %d\n", ret);
+        umdp_disconnect(connection);
+        return 1;
+    }
+
     switch (op) {
         case READ:
             devio_read(connection, port, len);
@@ -156,6 +163,13 @@ int main(int argc, char* argv[]) {
             devio_write(connection, port, len, value);
             break;
         }
+    }
+
+    ret = umdp_devio_release(connection, port, 1);
+    if (ret != 0) {
+        fprintf(stderr, "umdp_devio_release returned %d\n", ret);
+        umdp_disconnect(connection);
+        return 1;
     }
 
     umdp_disconnect(connection);
