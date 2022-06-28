@@ -46,7 +46,9 @@ if get_option('examples')
   echo_exe = executable('echo', 'examples/echo.c',
     dependencies: umdp_dep)
   devio_exe = executable('devio', 'examples/devio.c',
-        dependencies: umdp_dep)
+    dependencies: umdp_dep)
   interrupts_exe = executable('interrupts', 'examples/interrupts.c',
-                dependencies: umdp_dep)
+    dependencies: umdp_dep)
+  timer_exe = executable('timer', 'examples/timer.c',
+    dependencies: umdp_dep)
 endif

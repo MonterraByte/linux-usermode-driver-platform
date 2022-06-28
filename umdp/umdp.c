@@ -149,7 +149,6 @@ static const struct genl_ops umdp_genl_ops[] = {
         .doit = umdp_interrupt_unsubscribe,
         .dumpit = NULL,
     },
-
 };
 
 static const struct genl_multicast_group umdp_genl_multicast_groups[] = {
@@ -225,21 +224,38 @@ static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
     return 0;
 }
 
+struct devio_region {
+    u64 start;
+    u64 size;
+};
+
 struct devio_data {
-    u64 allocated_ports[UMDP_MAX_PORT_ALLOCATIONS];
-    size_t allocated_port_count;
+    struct devio_region allocated_regions[UMDP_MAX_PORT_ALLOCATIONS];
+    size_t allocated_region_count;
 };
 static struct devio_data devio_data;
 DEFINE_MUTEX(devio_data_mutex);
 
-static size_t umdp_devio_find_allocated_port_index(u64 port) {
+static size_t find_allocated_region_index(struct devio_region* region) {
     size_t i;
-    for (i = 0; i < devio_data.allocated_port_count; i++) {
-        if (devio_data.allocated_ports[i] == port) {
+    for (i = 0; i < devio_data.allocated_region_count; i++) {
+        if (devio_data.allocated_regions[i].start == region->start && devio_data.allocated_regions[i].size == region->size) {
             return i;
         }
     }
     return SIZE_MAX;
+}
+
+static bool is_ioport_allocated(u64 port) {
+    size_t i;
+    for (i = 0; i < devio_data.allocated_region_count; i++) {
+        u64 start = devio_data.allocated_regions[i].start;
+        u64 size = devio_data.allocated_regions[i].size;
+        if (start <= port && port < start + size) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
@@ -254,8 +270,7 @@ static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
 
     mutex_lock(&devio_data_mutex);
 
-    size_t port_index = umdp_devio_find_allocated_port_index(port);
-    if (port_index == SIZE_MAX) {
+    if (!is_ioport_allocated(port)) {
         mutex_unlock(&devio_data_mutex);
         printk(KERN_ERR "umdp: port %llu isn't registered, so it can't be read from\n", port);
         return -EPERM;
@@ -352,8 +367,7 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
 
     mutex_lock(&devio_data_mutex);
 
-    size_t port_index = umdp_devio_find_allocated_port_index(port);
-    if (port_index == SIZE_MAX) {
+    if (!is_ioport_allocated(port)) {
         mutex_unlock(&devio_data_mutex);
         printk(KERN_ERR "umdp: port %llu isn't registered, so it can't be written to\n", port);
         return -EPERM;
@@ -396,65 +410,82 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
 }
 
 static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
-    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
-    if (irq_attr == NULL) {
-        printk(KERN_ERR "umdp: invalid IO port subscription request: port attribute is missing\n");
+    struct nlattr* start_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
+    struct nlattr* size_attr = find_attribute(info->attrs, UMDP_ATTR_U32);
+
+    if (start_attr == NULL || size_attr == NULL) {
+        printk(KERN_ERR "umdp: invalid IO region request\n");
         return -EINVAL;
     }
-    u64 port = *((u64*) nla_data(irq_attr));
+    struct devio_region region = {
+        .start = *((u64*) nla_data(start_attr)),
+        .size = *((u32*) nla_data(size_attr)),
+    };
+    printk(KERN_DEBUG "umdp: received request for region %llu - %llu\n", region.start, region.start + region.size - 1);
 
     mutex_lock(&devio_data_mutex);
 
-    if (umdp_devio_find_allocated_port_index(port) != SIZE_MAX) {
+    if (find_allocated_region_index(&region) != SIZE_MAX) {
         // already allocated
         mutex_unlock(&devio_data_mutex);
         return 0;
     }
 
-    if (devio_data.allocated_port_count == UMDP_MAX_PORT_ALLOCATIONS) {
+    if (devio_data.allocated_region_count == UMDP_MAX_PORT_ALLOCATIONS) {
         mutex_unlock(&devio_data_mutex);
         printk(KERN_ERR "umdp: reached port allocation limit, cannot register another one\n");
         return -EBUSY;
     }
 
-    if (request_region(port, 1, UMDP_DEVICE_NAME) == NULL) {
-        mutex_unlock(&devio_data_mutex);
-        printk(KERN_ERR "umdp: failed to request port %llu, it's currently unavailable\n", port);
-        return -EBUSY;
+    if (request_region(region.start, region.size, UMDP_DEVICE_NAME) == NULL) {
+        release_region(region.start, region.size);
+        if (request_region(region.start, region.size, UMDP_DEVICE_NAME) == NULL) {
+            mutex_unlock(&devio_data_mutex);
+            printk(KERN_ERR "umdp: failed to request region %llu - %llu, it's currently unavailable\n", region.start, region.start + region.size - 1);
+            return -EBUSY;
+        }
     }
 
-    devio_data.allocated_port_count++;
-    devio_data.allocated_ports[devio_data.allocated_port_count - 1] = port;
+    devio_data.allocated_region_count++;
+    devio_data.allocated_regions[devio_data.allocated_region_count - 1] = region;
 
     mutex_unlock(&devio_data_mutex);
+    printk(KERN_DEBUG "umdp: region %llu - %llu allocated successfully\n", region.start, region.start + region.size - 1);
     return 0;
 }
 
 static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
-    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
-    if (irq_attr == NULL) {
-        printk(KERN_ERR "umdp: invalid IO port release request: port attribute is missing\n");
+    struct nlattr* start_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
+    struct nlattr* size_attr = find_attribute(info->attrs, UMDP_ATTR_U32);
+
+    if (start_attr == NULL || size_attr == NULL) {
+        printk(KERN_ERR "umdp: invalid IO region release request\n");
         return -EINVAL;
     }
-    u64 port = *((u64*) nla_data(irq_attr));
+    struct devio_region region = {
+        .start = *((u64*) nla_data(start_attr)),
+        .size = *((u32*) nla_data(size_attr)),
+    };
+    printk(KERN_DEBUG "umdp: received release request for region %llu - %llu\n", region.start, region.start + region.size - 1);
 
     mutex_lock(&devio_data_mutex);
 
-    size_t port_index = umdp_devio_find_allocated_port_index(port);
+    size_t port_index = find_allocated_region_index(&region);
     if (port_index == SIZE_MAX) {
         mutex_unlock(&devio_data_mutex);
-        printk(KERN_ERR "umdp: port %llu isn't registered, so it cannot be unregistered\n", port);
+        printk(KERN_ERR "umdp: region %llu - %llu isn't allocated, so it cannot be released\n", region.start, region.start + region.size - 1);
         return -ENOENT;
     }
 
-    devio_data.allocated_port_count--;
+    devio_data.allocated_region_count--;
     size_t i;
-    for (i = port_index; i < devio_data.allocated_port_count; i++) {
-        devio_data.allocated_ports[i] = devio_data.allocated_ports[i+1];
+    for (i = port_index; i < devio_data.allocated_region_count; i++) {
+        devio_data.allocated_regions[i] = devio_data.allocated_regions[i+1];
     }
 
-    release_region(port, 1);
+    release_region(region.start, region.size);
     mutex_unlock(&devio_data_mutex);
+    printk(KERN_DEBUG "umdp: region %llu - %llu released successfully\n", region.start, region.start + region.size - 1);
     return 0;
 }
 
@@ -608,7 +639,7 @@ static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* inf
 }
 
 static int umdp_init(void) {
-    devio_data.allocated_port_count = 0;
+    devio_data.allocated_region_count = 0;
     ih_data.registered_irq_count = 0;
 
     ih_workqueue = alloc_workqueue(UMDP_WORKQUEUE_NAME, 0, 0);
@@ -648,8 +679,8 @@ static void umdp_exit(void) {
 
     mutex_lock(&devio_data_mutex);
 
-    for (i = 0; i < devio_data.allocated_port_count; i++) {
-        release_region(devio_data.allocated_ports[i], 1);
+    for (i = 0; i < devio_data.allocated_region_count; i++) {
+        release_region(devio_data.allocated_regions[i].start, devio_data.allocated_regions[i].size);
     }
 
     mutex_unlock(&devio_data_mutex);
