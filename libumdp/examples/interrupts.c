@@ -38,6 +38,7 @@ int main(int argc, char* argv[]) {
     int ret = umdp_interrupt_subscribe(connection, irq);
     if (ret != 0) {
         fprintf(stderr, "umdp_interrupt_subscribe returned %d\n", ret);
+        umdp_disconnect(connection);
         return 1;
     }
 
@@ -47,13 +48,21 @@ int main(int argc, char* argv[]) {
         ret = umdp_receive_interrupt(connection, &received_irq);
         if (ret != 0) {
             fprintf(stderr, "umdp_receive_interrupt returned %d\n", ret);
-            break;
+            ret = umdp_interrupt_unsubscribe(connection, irq);
+            if (ret != 0) {
+                fprintf(stderr, "umdp_interrupt_unsubscribe returned %d\n", ret);
+            }
+            umdp_disconnect(connection);
+            return 1;
         }
         printf("Interrupt from IRQ %d\n", received_irq);
     }
     printf("Received 10 interrupt notifications, exiting\n");
 
-    umdp_interrupt_unsubscribe(connection, irq);
+    ret = umdp_interrupt_unsubscribe(connection, irq);
+    if (ret != 0) {
+        fprintf(stderr, "umdp_interrupt_unsubscribe returned %d\n", ret);
+    }
     umdp_disconnect(connection);
     return 0;
 }
