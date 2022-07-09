@@ -213,7 +213,14 @@ char* umdp_echo(umdp_connection* connection, char* string) {
         return NULL;
     }
 
-    return connection->received_echo;
+    size_t length = strlen(connection->received_echo) + 1;
+    char* copy = malloc(length);
+    if (copy == NULL) {
+        print_err("failed to allocate memory\n");
+        return NULL;
+    }
+    strncpy(copy, connection->received_echo, length);
+    return copy;
 
 msg_failure:
     nlmsg_free(msg);
