@@ -42,12 +42,14 @@ void cleanup(umdp_connection* connection) {
 }
 
 int get_conf(umdp_connection* connection, uint8_t* out) {
+    printf("Sending byte %x to port %x\n", TIMER_RB_CMD, TIMER_CTRL_PORT);
     int ret = umdp_devio_write_u8(connection, TIMER_CTRL_PORT, TIMER_RB_CMD);
     if (ret != 0) {
         fprintf(stderr, "umdp_devio_write_u8 returned %d\n", ret);
         return ret;
     }
 
+    printf("Reading from port %x\n", TIMER_0_PORT);
     ret = umdp_devio_read_u8(connection, TIMER_0_PORT, out);
     if (ret != 0) {
         fprintf(stderr, "umdp_devio_read_u8 returned %d\n", ret);
@@ -58,18 +60,21 @@ int get_conf(umdp_connection* connection, uint8_t* out) {
 }
 
 int set_conf(umdp_connection* connection, uint16_t counter) {
+    printf("Sending byte %x to port %x\n", TIMER_0_CONFIG, TIMER_CTRL_PORT);
     int ret = umdp_devio_write_u8(connection, TIMER_CTRL_PORT, TIMER_0_CONFIG);
     if (ret != 0) {
         fprintf(stderr, "umdp_devio_write_u8 returned %d\n", ret);
         return ret;
     }
 
+    printf("Sending byte %x to port %x\n", counter & 0xFF, TIMER_0_PORT);
     ret = umdp_devio_write_u8(connection, TIMER_0_PORT, counter & 0xFF);
     if (ret != 0) {
         fprintf(stderr, "umdp_devio_write_u8 returned %d\n", ret);
         return ret;
     }
 
+    printf("Sending byte %x to port %x\n", (counter & 0xFF00) >> 8, TIMER_0_PORT);
     ret = umdp_devio_write_u8(connection, TIMER_0_PORT, (counter & 0xFF00) >> 8);
     if (ret != 0) {
         fprintf(stderr, "umdp_devio_write_u8 returned %d\n", ret);
@@ -141,6 +146,7 @@ int main() {
         }
         printf("Received an interrupt (IRQ %u)\n", irq);
     }
+    printf("Received 10 interrupt notifications, exiting\n");
 
     ret = umdp_interrupt_unsubscribe(connection, TIMER_0_IRQ);
     if (ret != 0) {
