@@ -41,18 +41,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    printf("Subscribed to IRQ 0 successfully\n");
+    printf("Subscribed to IRQ %u successfully\n", irq);
     uint32_t received_irq;
-    while (1) {
+    for (size_t i = 0; i < 10; i++) {
         ret = umdp_receive_interrupt(connection, &received_irq);
         if (ret != 0) {
             fprintf(stderr, "umdp_receive_interrupt returned %d\n", ret);
             break;
         }
-        printf("IRQ: %d\n", received_irq);
+        printf("Interrupt from IRQ %d\n", received_irq);
     }
+    printf("Received 10 interrupt notifications, exiting\n");
 
-    printf("Disconnecting\n");
     umdp_interrupt_unsubscribe(connection, irq);
     umdp_disconnect(connection);
     return 0;
