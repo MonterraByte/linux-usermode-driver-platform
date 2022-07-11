@@ -105,7 +105,7 @@ int umdp_interrupt_handler(__attribute__((unused)) struct nl_cache_ops* _unused,
     }
 
     if (!irq_queue_push(&connection->irq_queue, irq)) {
-        print_err("IRQ queue is full, discarding received IRQ");
+        print_err("IRQ queue is full, discarding received IRQ\n");
     }
 
     return NL_SKIP;
