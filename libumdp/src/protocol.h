@@ -3,6 +3,7 @@
 
 #define UMDP_GENL_NAME "UMDP"
 #define UMDP_GENL_VERSION 1
+#define UMDP_GENL_INTERRUPT_MULTICAST_NAME "interrupt"
 
 enum {
     UMDP_ATTR_UNSPEC __attribute__((unused)) = 0,
