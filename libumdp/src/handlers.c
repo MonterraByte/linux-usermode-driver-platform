@@ -98,7 +98,12 @@ int umdp_interrupt_handler(__attribute__((unused)) struct nl_cache_ops* _unused,
         return NL_SKIP;
     }
 
-    if (!irq_queue_push(&connection->irq_queue, *((uint32_t*) nla_data(irq_attr)))) {
+    uint32_t irq = *((uint32_t*) nla_data(irq_attr));
+    if (!is_subscribed_to_irq(connection, irq)) {
+        return NL_SKIP;
+    }
+
+    if (!irq_queue_push(&connection->irq_queue, irq)) {
         print_err("IRQ queue is full, discarding received IRQ");
     }
 

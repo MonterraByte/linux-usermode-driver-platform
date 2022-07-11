@@ -37,11 +37,18 @@ bool irq_queue_pop(irq_queue* queue, uint32_t* out);
 
 struct umdp_connection {
     struct nl_sock* socket;
+
+    uint32_t* subscribed_irqs;
+    size_t subscribed_irq_count;
+
     char* received_echo;
     devio_value received_devio_value;
     irq_queue irq_queue;
 };
 
 void umdp_connection_init(umdp_connection* connection);
+void umdp_connection_add_irq(umdp_connection* connection, uint32_t irq);
+void umdp_connection_remove_irq(umdp_connection* connection, uint32_t irq);
+bool is_subscribed_to_irq(umdp_connection* connection, uint32_t irq);
 
 #endif  // UMDP_CONNECTION_H

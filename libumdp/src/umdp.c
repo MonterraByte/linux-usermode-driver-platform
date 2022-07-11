@@ -491,6 +491,11 @@ static int umdp_interrupt_subscription_request(umdp_connection* connection, uint
         return ret;
     }
 
+    if (command == UMDP_CMD_INTERRUPT_SUBSCRIBE) {
+        umdp_connection_add_irq(connection, irq);
+    } else {
+        umdp_connection_remove_irq(connection, irq);
+    }
     return 0;
 }
 
