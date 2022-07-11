@@ -498,6 +498,11 @@ int umdp_interrupt_unsubscribe(umdp_connection* connection, uint32_t irq) {
 }
 
 int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out) {
+    if (connection->subscribed_irq_count == 0) {
+        print_err("not subscribed to any IRQ lines");
+        return ENOENT;
+    }
+
     while (!irq_queue_pop(&connection->irq_queue, out)) {
         int ret = nl_recvmsgs_default(connection->socket);
         if (ret != 0) {
