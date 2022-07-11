@@ -84,8 +84,23 @@ int umdp_devio_read_handler(__attribute__((unused)) struct nl_cache_ops* _cache_
 
     if (!found_attribute) {
         print_err("received device IO read reply without a value attribute\n");
+    }
+
+    return NL_SKIP;
+}
+
+int umdp_interrupt_handler(__attribute__((unused)) struct nl_cache_ops* _unused, __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
+    umdp_connection* connection = arg;
+
+    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_MSG);
+    if (irq_attr == NULL) {
+        print_err("received an interrupt notification without an IRQ attribute\n");
         return NL_SKIP;
     }
 
-    return NL_STOP;
+    if (!irq_queue_push(&connection->irq_queue, *((uint32_t*) nla_data(irq_attr)))) {
+        print_err("IRQ queue is full, discarding received IRQ");
+    }
+
+    return NL_SKIP;
 }

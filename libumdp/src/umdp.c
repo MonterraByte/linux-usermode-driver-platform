@@ -40,6 +40,13 @@ static struct nla_policy umdp_genl_devio_policy[UMDP_ATTR_MAX + 1] = {
         },
 };
 
+static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_MAX + 1] = {
+    [UMDP_ATTR_U32] =
+        {
+            .type = NLA_U32,
+        },
+};
+
 static struct genl_cmd umdp_cmds[] = {
     {
         .c_id = UMDP_CMD_ECHO,
@@ -72,6 +79,25 @@ static struct genl_cmd umdp_cmds[] = {
         .c_name = "UMDP_CMD_DEVIO_RELEASE",
         .c_maxattr = UMDP_ATTR_MAX,
         .c_attr_policy = umdp_genl_devio_policy,
+    },
+    {
+        .c_id = UMDP_CMD_INTERRUPT_NOTIFICATION,
+        .c_name = "UMDP_CMD_INTERRUPT_NOTIFICATION",
+        .c_maxattr = UMDP_ATTR_MAX,
+        .c_attr_policy = umdp_genl_interrupt_policy,
+        .c_msg_parser = umdp_interrupt_handler,
+    },
+    {
+        .c_id = UMDP_CMD_INTERRUPT_SUBSCRIBE,
+        .c_name = "UMDP_CMD_INTERRUPT_SUBSCRIBE",
+        .c_maxattr = UMDP_ATTR_MAX,
+        .c_attr_policy = umdp_genl_interrupt_policy,
+    },
+    {
+        .c_id = UMDP_CMD_INTERRUPT_UNSUBSCRIBE,
+        .c_name = "UMDP_CMD_INTERRUPT_UNSUBSCRIBE",
+        .c_maxattr = UMDP_ATTR_MAX,
+        .c_attr_policy = umdp_genl_interrupt_policy,
     },
 };
 
@@ -416,5 +442,60 @@ int umdp_devio_release(umdp_connection* connection, uint64_t port) {
         return ret;
     }
 
+    return 0;
+}
+
+static int umdp_interrupt_subscription_request(umdp_connection* connection, uint32_t irq, uint8_t command) {
+    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(irq)));
+    if (msg == NULL) {
+        print_err("failed to allocate memory\n");
+        return ENOMEM;
+    }
+
+    if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, command, UMDP_GENL_VERSION) == NULL) {
+        print_err("failed to write netlink headers\n");
+        nlmsg_free(msg);
+        return -NLE_NOMEM;
+    }
+
+    int ret = nla_put_u32(msg, UMDP_ATTR_U32, irq);
+    if (ret != 0) {
+        printf_err("failed to write IRQ value: %s\n", nl_geterror(ret));
+        nlmsg_free(msg);
+        return ret;
+    }
+
+    ret = nl_send_auto(connection->socket, msg);
+    nlmsg_free(msg);
+    if (ret < 0) {
+        printf_err("failed to send interrupt subscription request: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    ret = nl_wait_for_ack(connection->socket);
+    if (ret != 0) {
+        printf_err("failed to receive ACK: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    return 0;
+}
+
+int umdp_interrupt_subscribe(umdp_connection* connection, uint32_t irq) {
+    return umdp_interrupt_subscription_request(connection, irq, UMDP_CMD_INTERRUPT_SUBSCRIBE);
+}
+
+int umdp_interrupt_unsubscribe(umdp_connection* connection, uint32_t irq) {
+    return umdp_interrupt_subscription_request(connection, irq, UMDP_CMD_INTERRUPT_UNSUBSCRIBE);
+}
+
+int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out) {
+    while (!irq_queue_pop(&connection->irq_queue, out)) {
+        int ret = nl_recvmsgs_default(connection->socket);
+        if (ret != 0) {
+            printf_err("failed to receive reply: %s\n", nl_geterror(ret));
+            return ret;
+        }
+    }
     return 0;
 }

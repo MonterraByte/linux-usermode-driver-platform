@@ -1,9 +1,12 @@
 #ifndef UMDP_CONNECTION_H
 #define UMDP_CONNECTION_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "umdp.h"
+
+#define IRQ_QUEUE_SIZE 32
 
 enum devio_value_type {
     DEVIO_VALUE_NONE,
@@ -20,6 +23,17 @@ typedef struct  {
         uint32_t u32;
     };
 } devio_value;
+
+typedef struct  {
+    size_t size;
+    size_t head;
+    size_t tail;
+    uint32_t values[IRQ_QUEUE_SIZE];
+} irq_queue;
+
+void irq_queue_init(irq_queue* queue);
+bool irq_queue_push(irq_queue* queue, uint32_t value);
+bool irq_queue_pop(irq_queue* queue, uint32_t* out);
 
 struct umdp_connection {
     struct nl_sock* socket;

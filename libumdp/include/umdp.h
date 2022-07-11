@@ -85,6 +85,10 @@ UMDP_PUBLIC int umdp_devio_write_u16(umdp_connection* connection, uint64_t port,
 /// \return 0 in case of success, a non-zero value in case of failure
 UMDP_PUBLIC int umdp_devio_write_u32(umdp_connection* connection, uint64_t port, uint32_t value);
 
+UMDP_PUBLIC int umdp_interrupt_subscribe(umdp_connection* connection, uint32_t irq);
+UMDP_PUBLIC int umdp_interrupt_unsubscribe(umdp_connection* connection, uint32_t irq);
+UMDP_PUBLIC int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out);
+
 #ifdef __cplusplus
 }
 #endif
