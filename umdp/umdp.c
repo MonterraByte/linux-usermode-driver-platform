@@ -17,7 +17,7 @@ MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
 
 /* attributes */
 enum {
-    UMDP_ATTR_UNSPEC = 0,
+    UMDP_ATTR_UNSPEC __attribute__((unused)) = 0,
     UMDP_ATTR_MSG = 1,
     UMDP_ATTR_U8 = 2,
     UMDP_ATTR_U16 = 3,
@@ -29,7 +29,7 @@ enum {
 
 /* commands */
 enum {
-    UMDP_CMD_UNSPEC = 0,
+    UMDP_CMD_UNSPEC __attribute__((unused)) = 0,
     UMDP_CMD_ECHO = 1,
     UMDP_CMD_DEVIO_READ = 2,
     UMDP_CMD_DEVIO_WRITE = 3,
