@@ -33,6 +33,7 @@ int umdp_echo_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,
     }
 
     size_t message_length = nla_len(msg_attr);
+    free(connection->received_echo);
     connection->received_echo = malloc(message_length);
     if (connection->received_echo == NULL) {
         print_err("failed to allocate memory\n");
