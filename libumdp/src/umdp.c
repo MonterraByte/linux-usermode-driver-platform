@@ -9,6 +9,7 @@
 #include <netlink/genl/mngt.h>
 #include <netlink/socket.h>
 
+#include "connection.h"
 #include "error.h"
 #include "handlers.h"
 #include "protocol.h"
@@ -80,10 +81,6 @@ static struct genl_ops umdp_family = {
     .o_ncmds = sizeof(umdp_cmds) / sizeof(struct genl_cmd),
 };
 
-struct umdp_connection {
-    struct nl_sock* socket;
-};
-
 umdp_connection* umdp_connect() {
     int ret = genl_register_family(&umdp_family);
     if (ret != 0 && ret != -NLE_EXIST) {
@@ -96,6 +93,7 @@ umdp_connection* umdp_connect() {
         print_err("failed to allocate memory\n");
         return NULL;
     }
+    umdp_connection_init(connection);
 
     connection->socket = nl_socket_alloc();
     if (connection->socket == NULL) {
@@ -103,7 +101,7 @@ umdp_connection* umdp_connect() {
         goto socket_failure;
     }
 
-    ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, NULL);
+    ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, connection);
     if (ret != 0) {
         printf_err("failed to register callback: %s\n", nl_geterror(ret));
         goto failure;
@@ -160,13 +158,6 @@ char* umdp_echo(umdp_connection* connection, char* string) {
         goto msg_failure;
     }
 
-    char* reply = NULL;
-    ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, &reply);
-    if (ret != 0) {
-        printf_err("failed to register callback: %s\n", nl_geterror(ret));
-        goto msg_failure;
-    }
-
     ret = nl_send_auto(connection->socket, msg);
     if (ret < 0) {
         printf_err("failed to send message: %s\n", nl_geterror(ret));
@@ -180,7 +171,7 @@ char* umdp_echo(umdp_connection* connection, char* string) {
         return NULL;
     }
 
-    return reply;
+    return connection->received_echo;
 
 msg_failure:
     nlmsg_free(msg);
@@ -188,8 +179,10 @@ msg_failure:
 }
 
 static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t type, void* out) {
+    connection->received_devio_value.type = DEVIO_VALUE_NONE;
+
     struct nl_msg* msg = nlmsg_alloc_size(
-        NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(uint64_t)) + nla_total_size(sizeof(uint8_t)));
+        NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)) + nla_total_size(sizeof(type)));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
         return ENOMEM;
@@ -217,13 +210,6 @@ static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t t
         return ret;
     }
 
-    ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, out);
-    if (ret != 0) {
-        printf_err("failed to register callback: %s\n", nl_geterror(ret));
-        nlmsg_free(msg);
-        return ret;
-    }
-
     ret = nl_send_auto(connection->socket, msg);
     if (ret < 0) {
         printf_err("failed to send device IO read request: %s\n", nl_geterror(ret));
@@ -232,12 +218,32 @@ static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t t
     }
     nlmsg_free(msg);
 
-    ret = nl_recvmsgs_default(connection->socket);
-    if (ret != 0) {
-        printf_err("failed to receive reply: %s\n", nl_geterror(ret));
-        return ret;
+    while (connection->received_devio_value.type == DEVIO_VALUE_NONE) {
+        ret = nl_recvmsgs_default(connection->socket);
+        if (ret != 0) {
+            printf_err("failed to receive reply: %s\n", nl_geterror(ret));
+            return ret;
+        }
     }
 
+    if ((type == UMDP_ATTR_U8 && connection->received_devio_value.type != DEVIO_VALUE_U8) || (type == UMDP_ATTR_U16 && connection->received_devio_value.type != DEVIO_VALUE_U16) || (type == UMDP_ATTR_U32 && connection->received_devio_value.type != DEVIO_VALUE_U32)) {
+        print_err("received value type does not match the expected type");
+        return -1;
+    }
+
+    switch (type) {
+        case UMDP_ATTR_U8:
+            *((uint8_t*) out) = connection->received_devio_value.u8;
+            break;
+        case UMDP_ATTR_U16:
+            *((uint16_t*) out) = connection->received_devio_value.u16;
+            break;
+        case UMDP_ATTR_U32:
+            *((uint32_t*) out) = connection->received_devio_value.u32;
+            break;
+    }
+
+    connection->received_devio_value.type = DEVIO_VALUE_NONE;
     return 0;
 }
 
@@ -269,8 +275,7 @@ static int umdp_devio_write(umdp_connection* connection, uint64_t port, uint8_t 
             return EINVAL;
     }
 
-    struct nl_msg* msg =
-        nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(uint64_t)) + nla_total_size(value_size));
+    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)) + nla_total_size(value_size));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
         return ENOMEM;
