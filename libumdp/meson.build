@@ -47,4 +47,6 @@ if get_option('examples')
     dependencies: umdp_dep)
   devio_exe = executable('devio', 'examples/devio.c',
         dependencies: umdp_dep)
+  interrupts_exe = executable('interrupts', 'examples/interrupts.c',
+                dependencies: umdp_dep)
 endif
