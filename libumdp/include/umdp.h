@@ -39,6 +39,9 @@ UMDP_PUBLIC void umdp_disconnect(umdp_connection* connection);
 UMDP_PUBLIC char* umdp_echo(umdp_connection* connection, char* string);
 
 
+UMDP_PUBLIC int umdp_devio_request(umdp_connection* connection, uint64_t port);
+UMDP_PUBLIC int umdp_devio_release(umdp_connection* connection, uint64_t port);
+
 /// Read a byte from the specified port
 /// \param connection `umdp_connection` to use
 /// \param port Port to read from
