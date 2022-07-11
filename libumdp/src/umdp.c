@@ -128,6 +128,9 @@ umdp_connection* umdp_connect() {
         goto socket_failure;
     }
 
+    // Disable seq number checks to be able to receive multicast messages
+    nl_socket_disable_seq_check(connection->socket);
+
     ret = nl_socket_modify_cb(connection->socket, NL_CB_VALID, NL_CB_CUSTOM, genl_handle_msg, connection);
     if (ret != 0) {
         printf_err("failed to register callback: %s\n", nl_geterror(ret));
