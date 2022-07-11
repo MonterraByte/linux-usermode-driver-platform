@@ -422,6 +422,10 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
         .size = *((u32*) nla_data(size_attr)),
     };
     printk(KERN_DEBUG "umdp: received request for region %llu - %llu\n", region.start, region.start + region.size - 1);
+    if (region.size == 0) {
+        printk(KERN_ERR "umdp: I/O regions cannot have size 0\n");
+        return -EINVAL;
+    }
 
     mutex_lock(&devio_data_mutex);
 

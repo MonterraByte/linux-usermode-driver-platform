@@ -393,6 +393,11 @@ int umdp_devio_write_u32(umdp_connection* connection, uint64_t port, uint32_t va
 }
 
 static int umdp_devio_region_request(umdp_connection* connection, uint64_t start, uint32_t size, uint8_t command) {
+    if (size == 0) {
+        print_err("size cannot be 0\n");
+        return EINVAL;
+    }
+
     struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(start)) + nla_total_size(sizeof(size)));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
