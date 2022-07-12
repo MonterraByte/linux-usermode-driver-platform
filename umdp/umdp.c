@@ -3,6 +3,7 @@
 #include <linux/ioport.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/timer.h>
 #include <linux/workqueue.h>
 #include <net/genetlink.h>
 #include <net/netlink.h>
@@ -642,6 +643,32 @@ static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* inf
     return 0;
 }
 
+void ih_timer_callback(struct timer_list* timer) {
+    bool subscribed_to_irq0 = false;
+    size_t i;
+    for (i = 0; i < ih_data.registered_irq_count; i++) {
+        if (ih_data.registered_irqs[i] == 0) {
+            subscribed_to_irq0 = true;
+            break;
+        }
+    }
+
+    if (subscribed_to_irq0) {
+        for (i = 0; i < UMDP_WORKER_COUNT; i++) {
+            if (!ih_workers[i].busy) {
+                ih_workers[i].busy = true;
+                ih_workers[i].irq = 0;
+                INIT_WORK(&ih_workers[i].ws, interrupt_handler_wq);
+                queue_work(ih_workqueue, (struct work_struct*) &ih_workers[i]);
+                break;
+            }
+        }
+    }
+    mod_timer(timer, jiffies + msecs_to_jiffies(5000));
+}
+
+static struct timer_list ih_timer;
+
 static int umdp_init(void) {
     devio_data.allocated_region_count = 0;
     ih_data.registered_irq_count = 0;
@@ -658,6 +685,9 @@ static int umdp_init(void) {
         return ret;
     }
 
+    timer_setup(&ih_timer, ih_timer_callback, 0);
+    mod_timer(&ih_timer, jiffies + msecs_to_jiffies(5000));
+
     printk(KERN_INFO "umdp: Registered netlink kernel family (id: %d)\n", umdp_genl_family.id);
     return 0;
 }
@@ -670,6 +700,7 @@ static void umdp_exit(void) {
         printk(KERN_INFO "umdp: Unregistered netlink family\n");
     }
 
+    del_timer_sync(&ih_timer);
     destroy_workqueue(ih_workqueue);
 
     mutex_lock(&ih_data_mutex);
