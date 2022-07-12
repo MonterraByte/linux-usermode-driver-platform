@@ -1,6 +1,7 @@
 *.mod
 *.mod.c
 *.o
+*.o.d
 *.ko
 .*.cmd
 Module.symvers
