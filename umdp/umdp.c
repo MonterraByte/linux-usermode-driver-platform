@@ -316,20 +316,20 @@ static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
     int ret;
     switch (reply_size) {
         case sizeof(u8): {
-            u8 value = inb(port);
-            printk(KERN_DEBUG "umdp: read %u (%x) from port %llu\n", value, value, port);
+            u8 value = 0;
+            printk(KERN_DEBUG "umdp: (not) read %u (%x) from port %llu\n", value, value, port);
             ret = nla_put_u8(reply, UMDP_ATTR_U8, value);
             break;
         }
         case sizeof(u16): {
-            u16 value = inw(port);
-            printk(KERN_DEBUG "umdp: read %u (%x) from port %llu\n", value, value, port);
+            u16 value = 0;
+            printk(KERN_DEBUG "umdp: (not) read %u (%x) from port %llu\n", value, value, port);
             ret = nla_put_u16(reply, UMDP_ATTR_U16, value);
             break;
         }
         case sizeof(u32): {
-            u32 value = inl(port);
-            printk(KERN_DEBUG "umdp: read %u (%x) from port %llu\n", value, value, port);
+            u32 value = 0;
+            printk(KERN_DEBUG "umdp: (not) read %u (%x) from port %llu\n", value, value, port);
             ret = nla_put_u32(reply, UMDP_ATTR_U32, value);
             break;
         }
@@ -384,20 +384,17 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
         switch (nla_type(info->attrs[i])) {
             case UMDP_ATTR_U8: {
                 u8 value = *((u8*) nla_data(info->attrs[i]));
-                printk(KERN_DEBUG "umdp: writing %u (%x) to port %llu\n", value, value, port);
-                outb(value, port);
+                printk(KERN_DEBUG "umdp: (not) writing %u (%x) to port %llu\n", value, value, port);
                 return 0;
             }
             case UMDP_ATTR_U16: {
                 u16 value = *((u16*) nla_data(info->attrs[i]));
-                printk(KERN_DEBUG "umdp: writing %u (%x) to port %llu\n", value, value, port);
-                outw(value, port);
+                printk(KERN_DEBUG "umdp: (not) writing %u (%x) to port %llu\n", value, value, port);
                 return 0;
             }
             case UMDP_ATTR_U32: {
                 u32 value = *((u32*) nla_data(info->attrs[i]));
-                printk(KERN_DEBUG "umdp: writing %u (%x) to port %llu\n", value, value, port);
-                outl(value, port);
+                printk(KERN_DEBUG "umdp: (not) writing %u (%x) to port %llu\n", value, value, port);
                 return 0;
             }
             default:
@@ -441,20 +438,11 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
         return -EBUSY;
     }
 
-    if (request_region(region.start, region.size, UMDP_DEVICE_NAME) == NULL) {
-        release_region(region.start, region.size);
-        if (request_region(region.start, region.size, UMDP_DEVICE_NAME) == NULL) {
-            mutex_unlock(&devio_data_mutex);
-            printk(KERN_ERR "umdp: failed to request region %llu - %llu, it's currently unavailable\n", region.start, region.start + region.size - 1);
-            return -EBUSY;
-        }
-    }
-
     devio_data.allocated_region_count++;
     devio_data.allocated_regions[devio_data.allocated_region_count - 1] = region;
 
     mutex_unlock(&devio_data_mutex);
-    printk(KERN_DEBUG "umdp: region %llu - %llu allocated successfully\n", region.start, region.start + region.size - 1);
+    printk(KERN_DEBUG "umdp: region %llu - %llu (not) allocated successfully\n", region.start, region.start + region.size - 1);
     return 0;
 }
 
@@ -487,9 +475,8 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
         devio_data.allocated_regions[i] = devio_data.allocated_regions[i+1];
     }
 
-    release_region(region.start, region.size);
     mutex_unlock(&devio_data_mutex);
-    printk(KERN_DEBUG "umdp: region %llu - %llu released successfully\n", region.start, region.start + region.size - 1);
+    printk(KERN_DEBUG "umdp: region %llu - %llu (not) released successfully\n", region.start, region.start + region.size - 1);
     return 0;
 }
 
@@ -589,19 +576,11 @@ static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info)
         return -EBUSY;
     }
 
-    // TODO: allow the user to decide if they want IRQF_SHARED
-    int ret = request_irq(irq, interrupt_handler, IRQF_SHARED, UMDP_DEVICE_NAME, &ih_data);
-    if (ret != 0) {
-        mutex_unlock(&ih_data_mutex);
-        printk(KERN_ERR "umdp: IRQ request failed with code %d\n", ret);
-        return ret;
-    }
-
     ih_data.registered_irq_count++;
     ih_data.registered_irqs[ih_data.registered_irq_count - 1] = irq;
 
     mutex_unlock(&ih_data_mutex);
-    printk(KERN_INFO "umdp: subscribed to IRQ %u\n", irq);
+    printk(KERN_INFO "umdp: (not) subscribed to IRQ %u\n", irq);
     printk(KERN_INFO "umdp: client port id: %u\n", info->snd_portid);
     return 0;
 }
@@ -636,9 +615,8 @@ static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* inf
         ih_data.registered_irqs[i] = ih_data.registered_irqs[i+1];
     }
 
-    free_irq(irq, &ih_data);
     mutex_unlock(&ih_data_mutex);
-    printk(KERN_INFO "umdp: unsubscribed from IRQ %u\n", irq);
+    printk(KERN_INFO "umdp: (not) unsubscribed from IRQ %u\n", irq);
     return 0;
 }
 
@@ -671,23 +649,6 @@ static void umdp_exit(void) {
     }
 
     destroy_workqueue(ih_workqueue);
-
-    mutex_lock(&ih_data_mutex);
-
-    size_t i;
-    for (i = 0; i < ih_data.registered_irq_count; i++) {
-        free_irq(ih_data.registered_irqs[i], &ih_data);
-    }
-
-    mutex_unlock(&ih_data_mutex);
-
-    mutex_lock(&devio_data_mutex);
-
-    for (i = 0; i < devio_data.allocated_region_count; i++) {
-        release_region(devio_data.allocated_regions[i].start, devio_data.allocated_regions[i].size);
-    }
-
-    mutex_unlock(&devio_data_mutex);
 }
 
 module_init(umdp_init);
