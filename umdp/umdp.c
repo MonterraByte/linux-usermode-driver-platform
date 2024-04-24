@@ -1,3 +1,4 @@
+#include <linux/fdtable.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
@@ -183,6 +184,21 @@ static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
     return NULL;
 }
 
+static int process_open_files(const void* unused, struct file* file, unsigned fd) {
+    struct socket* socket = sock_from_file(file);
+    if (socket == NULL || socket->ops->family != PF_NETLINK) {
+        return 0;
+    }
+
+    return 0;
+}
+
+static void check_process_for_netlink_portid(struct pid* process) {
+    struct task_struct* task = get_pid_task(process, PIDTYPE_PID);
+    iterate_fd(task->files, 0, process_open_files, NULL);
+    put_task_struct(task);
+}
+
 /* UMDP_CMD_ECHO handler */
 static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
     printk(KERN_DEBUG "umdp: received echo request\n");
@@ -192,6 +208,11 @@ static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
         printk(KERN_ERR "umdp: did not find message attribute in echo request\n");
         return -EINVAL;
     }
+
+    struct pid* process = find_get_pid(pid);
+    check_process_for_netlink_portid(process);
+    put_pid(process);
+    // info->snd_portid
 
     struct sk_buff* reply = genlmsg_new(nla_total_size(nla_len(msg_attr)), GFP_KERNEL);
     if (reply == NULL) {
