@@ -108,7 +108,7 @@ static struct genl_ops umdp_family = {
     .o_ncmds = sizeof(umdp_cmds) / sizeof(struct genl_cmd),
 };
 
-umdp_connection* umdp_connect() {
+umdp_connection* umdp_connect(void) {
     int ret = genl_register_family(&umdp_family);
     if (ret != 0 && ret != -NLE_EXIST) {
         printf_err("failed to register generic netlink family: %s\n", nl_geterror(ret));

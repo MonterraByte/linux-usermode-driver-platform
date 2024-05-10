@@ -32,7 +32,7 @@ typedef struct umdp_connection umdp_connection;
 /// The returned `umdp_connection` should be destroyed after its last use using `umdp_disconnect()`.
 ///
 /// \return Pointer to `umdp_connection` or `NULL` in case of failure
-UMDP_PUBLIC umdp_connection* umdp_connect();
+UMDP_PUBLIC umdp_connection* umdp_connect(void);
 
 /// Disconnect the specified UMDP connection, freeing all associated resources.
 ///

@@ -15,7 +15,7 @@
 #define TIMER_RB_CMD (BIT(1) | BIT(5) | BIT(6) | BIT(7))
 #define TIMER_0_CONFIG (BIT(1) | BIT(2) | BIT(4) | BIT(5))
 
-umdp_connection* setup() {
+umdp_connection* setup(void) {
     umdp_connection* connection = umdp_connect();
     if (connection == NULL) {
         fprintf(stderr, "umdp_init returned NULL\n");
@@ -97,7 +97,7 @@ void print_status(uint8_t status) {
     printf("\n");
 }
 
-int main() {
+int main(void) {
     umdp_connection* connection = setup();
 
     uint8_t status = 0;

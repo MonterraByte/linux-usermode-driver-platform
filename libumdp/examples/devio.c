@@ -12,7 +12,7 @@ typedef enum {
 } operation;
 
 char* argv0;
-void print_usage() {
+void print_usage(void) {
     fprintf(stderr, "USAGE: %s read port [region_start region_end]\n       %s write port value [region_start region_end]\n", argv0, argv0);
     exit(1);
 }
