@@ -1,3 +1,4 @@
+#include <linux/fdtable.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
@@ -6,6 +7,7 @@
 #include <linux/workqueue.h>
 #include <net/genetlink.h>
 #include <net/netlink.h>
+#include <net/sock.h>
 
 MODULE_DESCRIPTION("User mode driver platform");
 MODULE_LICENSE("GPL");
@@ -183,15 +185,37 @@ static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
     return NULL;
 }
 
+static int process_open_files(const void* unused, struct file* file, unsigned fd) {
+    struct socket* socket = sock_from_file(file);
+    if (socket == NULL || socket->ops->family != PF_NETLINK) {
+        return 0;
+    }
+
+    printk(KERN_DEBUG "umdp: found netlink socket, dport=%u\n", socket->sk->sk_dport);
+
+    return 0;
+}
+
+static void check_process_for_netlink_portid(struct pid* process) {
+    struct task_struct* task = get_pid_task(process, PIDTYPE_PID);
+    iterate_fd(task->files, 0, process_open_files, NULL);
+    put_task_struct(task);
+}
+
 /* UMDP_CMD_ECHO handler */
 static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
-    printk(KERN_DEBUG "umdp: received echo request\n");
+    printk(KERN_DEBUG "umdp: received echo request from portid %u\n", info->snd_portid);
 
     struct nlattr* msg_attr = find_attribute(info->attrs, UMDP_ATTR_MSG);
     if (msg_attr == NULL) {
         printk(KERN_ERR "umdp: did not find message attribute in echo request\n");
         return -EINVAL;
     }
+
+    struct pid* process = find_get_pid(pid);
+    check_process_for_netlink_portid(process);
+    put_pid(process);
+    // info->snd_portid
 
     struct sk_buff* reply = genlmsg_new(nla_total_size(nla_len(msg_attr)), GFP_KERNEL);
     if (reply == NULL) {
@@ -590,7 +614,12 @@ static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info)
     }
 
     // TODO: allow the user to decide if they want IRQF_SHARED
-    int ret = request_irq(irq, interrupt_handler, IRQF_SHARED, UMDP_DEVICE_NAME, &ih_data);
+    unsigned long flags = IRQF_SHARED;
+    if (irq == 0) {
+        flags |= IRQF_NOBALANCING | IRQF_IRQPOLL | IRQF_TIMER;
+    }
+
+    int ret = request_irq(irq, interrupt_handler, flags, UMDP_DEVICE_NAME, &ih_data);
     if (ret != 0) {
         mutex_unlock(&ih_data_mutex);
         printk(KERN_ERR "umdp: IRQ request failed with code %d\n", ret);
