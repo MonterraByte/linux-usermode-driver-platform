@@ -51,6 +51,8 @@ if get_option('examples')
     dependencies: umdp_dep)
   keep_open_exe = executable('keep-open', 'examples/keep-open.c',
     dependencies: umdp_dep)
+  keyboard_exe = executable('keyboard', 'examples/keyboard.c',
+    dependencies: umdp_dep)
   timer_exe = executable('timer', 'examples/timer.c',
     dependencies: umdp_dep)
 endif
