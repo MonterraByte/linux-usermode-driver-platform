@@ -147,6 +147,8 @@ UMDP_PUBLIC int umdp_interrupt_unsubscribe(umdp_connection* connection, uint32_t
 /// \return 0 in case of success, a non-zero value in case of failure
 UMDP_PUBLIC int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out);
 
+UMDP_PUBLIC const char* umdp_strerror(int error);
+
 #ifdef __cplusplus
 }
 #endif

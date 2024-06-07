@@ -512,3 +512,13 @@ int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out) {
     }
     return 0;
 }
+
+const char* umdp_strerror(int error) {
+    if (error < 0) {
+        return nl_geterror(error);
+    } else if (error > 0) {
+        return strerror(error);
+    } else {
+        return "";
+    }
+}
