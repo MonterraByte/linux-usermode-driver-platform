@@ -1,3 +1,4 @@
+#include <linux/fdtable.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
@@ -6,6 +7,7 @@
 #include <linux/workqueue.h>
 #include <net/genetlink.h>
 #include <net/netlink.h>
+#include <net/sock.h>
 
 MODULE_DESCRIPTION("User mode driver platform");
 MODULE_LICENSE("GPL");
@@ -222,6 +224,44 @@ static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
 
     printk(KERN_DEBUG "umdp: sent echo reply\n");
     return 0;
+}
+
+// `struct netlink_sock` is defined in `net/netlink/af_netlink.h` in the kernel source code, which isn't part of the "public" headers.
+// However, we need to access the portid.
+// The following is an evil hack, pray that the alignment matches the original struct.
+
+struct partial_netlink_sock {
+    struct sock sk __attribute__((unused));
+    unsigned long flags __attribute__((unused));
+    u32 portid;
+    // ...
+};
+
+static int check_if_open_file_is_netlink_socket_with_port_id(
+    const void* v, struct file* file, __attribute__((unused)) unsigned fd) {
+    struct socket* socket = sock_from_file(file);
+    if (socket == NULL || socket->ops->family != PF_NETLINK) {
+        return 0;
+    }
+
+    struct partial_netlink_sock* nlk = container_of(socket->sk, struct partial_netlink_sock, sk);
+    printk(KERN_DEBUG "umdp: found netlink socket with portid %u:\n", nlk->portid);
+
+    u32 expected_port_id = *(u32*) v;
+    if (nlk->portid == expected_port_id) {
+        // Returning a non-zero value causes `iterate_fd` to return early.
+        return 1;
+    }
+
+    return 0;
+}
+
+static bool check_process_for_netlink_socket_with_port_id(struct pid* pid, u32 port_id) {
+    struct task_struct* task = get_pid_task(pid, PIDTYPE_PID);
+    int result = iterate_fd(task->files, 0, check_if_open_file_is_netlink_socket_with_port_id, &port_id);
+    put_task_struct(task);
+
+    return result != 0;
 }
 
 struct devio_region {
