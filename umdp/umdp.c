@@ -2,8 +2,11 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
+#include <linux/list.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/pid.h>
+#include <linux/rwsem.h>
 #include <linux/workqueue.h>
 #include <net/genetlink.h>
 #include <net/netlink.h>
@@ -224,6 +227,46 @@ static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
 
     printk(KERN_DEBUG "umdp: sent echo reply\n");
     return 0;
+}
+
+struct client_info {
+    struct list_head list;
+    u32 port_id;
+    struct pid* pid;
+};
+static LIST_HEAD(client_info_list);
+static DECLARE_RWSEM(client_info_lock);
+#define for_each_client_info(p) list_for_each_entry(p, &client_info_list, list)
+#define for_each_client_info_safe(p, next) list_for_each_entry_safe(p, next, &client_info_list, list)
+
+// client_info_list write lock must be acquired when calling this
+static bool register_client(u32 port_id, struct pid* pid) {
+    struct client_info* client_info = kmalloc(sizeof(struct client_info), GFP_KERNEL);
+    if (client_info == NULL) {
+        printk(KERN_ERR "umdp: failed to allocate memory for client info\n");
+        return false;
+    }
+
+    INIT_LIST_HEAD(&client_info->list);
+    client_info->port_id = port_id;
+    client_info->pid = pid;
+
+    list_add_tail(&client_info->list, &client_info_list);
+    return true;
+}
+
+// client_info_list write lock must be acquired when calling this
+static bool register_client_if_not_registered(u32 port_id, struct pid* pid) {
+    struct client_info* p;
+    for_each_client_info(p) {
+        if (p->port_id == port_id) {
+            // already registered
+            printk(KERN_ERR "umdp: port ID %d was already registered, it cannot be registered again\n", port_id);
+            return false;
+        }
+    }
+
+    return register_client(port_id, pid);
 }
 
 // `struct netlink_sock` is defined in `net/netlink/af_netlink.h` in the kernel source code, which isn't part of the "public" headers.
@@ -733,6 +776,16 @@ static void umdp_exit(void) {
     }
 
     mutex_unlock(&devio_data_mutex);
+
+    down_write(&client_info_lock);
+    struct client_info* p;
+    struct client_info* next;
+    for_each_client_info_safe(p, next) {
+        list_del(&p->list);
+        put_pid(p->pid);
+        kfree(p);
+    }
+    up_write(&client_info_lock);
 }
 
 module_init(umdp_init);
