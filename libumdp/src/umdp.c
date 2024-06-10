@@ -125,7 +125,7 @@ umdp_connection* umdp_connect(void) {
     connection->socket = nl_socket_alloc();
     if (connection->socket == NULL) {
         print_err("failed to allocate socket\n");
-        goto socket_failure;
+        goto failure;
     }
 
     // Disable seq number checks to be able to receive multicast messages
@@ -168,8 +168,7 @@ umdp_connection* umdp_connect(void) {
     return connection;
 
 failure:
-    nl_socket_free(connection->socket);
-socket_failure:
+    umdp_connection_destroy(connection);
     free(connection);
     return NULL;
 }
