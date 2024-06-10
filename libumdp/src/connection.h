@@ -15,7 +15,7 @@ enum devio_value_type {
     DEVIO_VALUE_U32,
 };
 
-typedef struct  {
+typedef struct {
     enum devio_value_type type;
     union {
         uint8_t u8;
@@ -24,7 +24,7 @@ typedef struct  {
     };
 } devio_value;
 
-typedef struct  {
+typedef struct {
     size_t size;
     size_t head;
     size_t tail;

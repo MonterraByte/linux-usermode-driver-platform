@@ -239,7 +239,8 @@ DEFINE_MUTEX(devio_data_mutex);
 static size_t find_allocated_region_index(struct devio_region* region) {
     size_t i;
     for (i = 0; i < devio_data.allocated_region_count; i++) {
-        if (devio_data.allocated_regions[i].start == region->start && devio_data.allocated_regions[i].size == region->size) {
+        if (devio_data.allocated_regions[i].start == region->start
+            && devio_data.allocated_regions[i].size == region->size) {
             return i;
         }
     }
@@ -445,7 +446,8 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
         release_region(region.start, region.size);
         if (request_region(region.start, region.size, UMDP_DEVICE_NAME) == NULL) {
             mutex_unlock(&devio_data_mutex);
-            printk(KERN_ERR "umdp: failed to request region %llu - %llu, it's currently unavailable\n", region.start, region.start + region.size - 1);
+            printk(KERN_ERR "umdp: failed to request region %llu - %llu, it's currently unavailable\n", region.start,
+                region.start + region.size - 1);
             return -EBUSY;
         }
     }
@@ -454,7 +456,8 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
     devio_data.allocated_regions[devio_data.allocated_region_count - 1] = region;
 
     mutex_unlock(&devio_data_mutex);
-    printk(KERN_DEBUG "umdp: region %llu - %llu allocated successfully\n", region.start, region.start + region.size - 1);
+    printk(
+        KERN_DEBUG "umdp: region %llu - %llu allocated successfully\n", region.start, region.start + region.size - 1);
     return 0;
 }
 
@@ -470,21 +473,23 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
         .start = *((u64*) nla_data(start_attr)),
         .size = *((u32*) nla_data(size_attr)),
     };
-    printk(KERN_DEBUG "umdp: received release request for region %llu - %llu\n", region.start, region.start + region.size - 1);
+    printk(KERN_DEBUG "umdp: received release request for region %llu - %llu\n", region.start,
+        region.start + region.size - 1);
 
     mutex_lock(&devio_data_mutex);
 
     size_t port_index = find_allocated_region_index(&region);
     if (port_index == SIZE_MAX) {
         mutex_unlock(&devio_data_mutex);
-        printk(KERN_ERR "umdp: region %llu - %llu isn't allocated, so it cannot be released\n", region.start, region.start + region.size - 1);
+        printk(KERN_ERR "umdp: region %llu - %llu isn't allocated, so it cannot be released\n", region.start,
+            region.start + region.size - 1);
         return -ENOENT;
     }
 
     devio_data.allocated_region_count--;
     size_t i;
     for (i = port_index; i < devio_data.allocated_region_count; i++) {
-        devio_data.allocated_regions[i] = devio_data.allocated_regions[i+1];
+        devio_data.allocated_regions[i] = devio_data.allocated_regions[i + 1];
     }
 
     release_region(region.start, region.size);
@@ -510,7 +515,7 @@ struct ih_work_struct {
 };
 static struct ih_work_struct ih_workers[UMDP_WORKER_COUNT];
 
-static irqreturn_t interrupt_handler(int irq, void *dev_id) {
+static irqreturn_t interrupt_handler(int irq, void* dev_id) {
     size_t i;
     for (i = 0; i < UMDP_WORKER_COUNT; i++) {
         if (!ih_workers[i].busy) {
@@ -633,7 +638,7 @@ static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* inf
 
     ih_data.registered_irq_count--;
     for (i = irq_index; i < ih_data.registered_irq_count; i++) {
-        ih_data.registered_irqs[i] = ih_data.registered_irqs[i+1];
+        ih_data.registered_irqs[i] = ih_data.registered_irqs[i + 1];
     }
 
     free_irq(irq, &ih_data);

@@ -39,8 +39,8 @@ IncludeBlocks: Preserve
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 2
 PointerAlignment: Left
-ReflowComments: true
-SortIncludes: true
+ReflowComments: false
+SortIncludes: CaseInsensitive
 SortUsingDeclarations: true
 SpaceAfterCStyleCast: true
 SpaceAfterLogicalNot: false

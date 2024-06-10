@@ -13,11 +13,15 @@ typedef enum {
 
 char* argv0;
 void print_usage(void) {
-    fprintf(stderr, "USAGE: %s read port [region_start region_end]\n       %s write port value [region_start region_end]\n", argv0, argv0);
+    fprintf(stderr,
+        "USAGE: %s read port [region_start region_end]\n"
+        "       %s write port value [region_start region_end]\n",
+        argv0, argv0);
     exit(1);
 }
 
-void parse_args(int argc, char* argv[], operation* op, uint64_t* port, uint8_t* value, bool* region_specified, uint64_t* region_start, uint64_t* region_end) {
+void parse_args(int argc, char* argv[], operation* op, uint64_t* port, uint8_t* value, bool* region_specified,
+    uint64_t* region_start, uint64_t* region_end) {
     if (argc < 2) {
         print_usage();
     }

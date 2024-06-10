@@ -61,14 +61,14 @@ void umdp_connection_add_irq(umdp_connection* connection, uint32_t irq) {
         abort();
     }
 
-    connection->subscribed_irqs[connection->subscribed_irq_count-1] = irq;
+    connection->subscribed_irqs[connection->subscribed_irq_count - 1] = irq;
 }
 
 void umdp_connection_remove_irq(umdp_connection* connection, uint32_t irq) {
     for (size_t i = 0; i < connection->subscribed_irq_count; i++) {
         if (connection->subscribed_irqs[i] == irq) {
             for (size_t j = i + 1; j < connection->subscribed_irq_count; j++) {
-                connection->subscribed_irqs[j-1] = connection->subscribed_irqs[j];
+                connection->subscribed_irqs[j - 1] = connection->subscribed_irqs[j];
             }
 
             connection->subscribed_irq_count--;

@@ -152,7 +152,8 @@ umdp_connection* umdp_connect(void) {
         goto failure;
     }
 
-    int interrupt_multicast_group = genl_ctrl_resolve_grp(connection->socket, UMDP_GENL_NAME, UMDP_GENL_INTERRUPT_MULTICAST_NAME);
+    int interrupt_multicast_group =
+        genl_ctrl_resolve_grp(connection->socket, UMDP_GENL_NAME, UMDP_GENL_INTERRUPT_MULTICAST_NAME);
     if (interrupt_multicast_group < 0) {
         printf_err("failed to resolve multicast group: %s\n", nl_geterror(interrupt_multicast_group));
         goto failure;
@@ -230,8 +231,8 @@ msg_failure:
 static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t type, void* out) {
     connection->received_devio_value.type = DEVIO_VALUE_NONE;
 
-    struct nl_msg* msg = nlmsg_alloc_size(
-        NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)) + nla_total_size(sizeof(type)));
+    struct nl_msg* msg =
+        nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)) + nla_total_size(sizeof(type)));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
         return ENOMEM;
@@ -275,7 +276,9 @@ static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t t
         }
     }
 
-    if ((type == UMDP_ATTR_U8 && connection->received_devio_value.type != DEVIO_VALUE_U8) || (type == UMDP_ATTR_U16 && connection->received_devio_value.type != DEVIO_VALUE_U16) || (type == UMDP_ATTR_U32 && connection->received_devio_value.type != DEVIO_VALUE_U32)) {
+    if ((type == UMDP_ATTR_U8 && connection->received_devio_value.type != DEVIO_VALUE_U8)
+        || (type == UMDP_ATTR_U16 && connection->received_devio_value.type != DEVIO_VALUE_U16)
+        || (type == UMDP_ATTR_U32 && connection->received_devio_value.type != DEVIO_VALUE_U32)) {
         print_err("received value type does not match the expected type");
         return -1;
     }
@@ -324,7 +327,8 @@ static int umdp_devio_write(umdp_connection* connection, uint64_t port, uint8_t 
             return EINVAL;
     }
 
-    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)) + nla_total_size(value_size));
+    struct nl_msg* msg =
+        nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(port)) + nla_total_size(value_size));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
         return ENOMEM;
@@ -398,13 +402,15 @@ static int umdp_devio_region_request(umdp_connection* connection, uint64_t start
         return EINVAL;
     }
 
-    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(start)) + nla_total_size(sizeof(size)));
+    struct nl_msg* msg =
+        nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(start)) + nla_total_size(sizeof(size)));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
         return ENOMEM;
     }
 
-    if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, command, UMDP_GENL_VERSION) == NULL) {
+    if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, command, UMDP_GENL_VERSION)
+        == NULL) {
         print_err("failed to write netlink headers\n");
         nlmsg_free(msg);
         return -NLE_NOMEM;
@@ -455,7 +461,8 @@ static int umdp_interrupt_subscription_request(umdp_connection* connection, uint
         return ENOMEM;
     }
 
-    if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, command, UMDP_GENL_VERSION) == NULL) {
+    if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, command, UMDP_GENL_VERSION)
+        == NULL) {
         print_err("failed to write netlink headers\n");
         nlmsg_free(msg);
         return -NLE_NOMEM;
