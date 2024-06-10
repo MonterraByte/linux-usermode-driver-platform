@@ -34,6 +34,7 @@ enum {
     UMDP_ATTR_U16 = 3,
     UMDP_ATTR_U32 = 4,
     UMDP_ATTR_U64 = 5,
+    UMDP_ATTR_S32 = 6,
     __UMDP_ATTR_MAX,
 };
 #define UMDP_ATTR_MAX (__UMDP_ATTR_MAX - 1)
@@ -42,13 +43,14 @@ enum {
 enum {
     UMDP_CMD_UNSPEC __attribute__((unused)) = 0,
     UMDP_CMD_ECHO = 1,
-    UMDP_CMD_DEVIO_READ = 2,
-    UMDP_CMD_DEVIO_WRITE = 3,
-    UMDP_CMD_DEVIO_REQUEST = 4,
-    UMDP_CMD_DEVIO_RELEASE = 5,
-    UMDP_CMD_INTERRUPT_NOTIFICATION = 6,
-    UMDP_CMD_INTERRUPT_SUBSCRIBE = 7,
-    UMDP_CMD_INTERRUPT_UNSUBSCRIBE = 8,
+    UMDP_CMD_CONNECT = 2,
+    UMDP_CMD_DEVIO_READ = 3,
+    UMDP_CMD_DEVIO_WRITE = 4,
+    UMDP_CMD_DEVIO_REQUEST = 5,
+    UMDP_CMD_DEVIO_RELEASE = 6,
+    UMDP_CMD_INTERRUPT_NOTIFICATION = 7,
+    UMDP_CMD_INTERRUPT_SUBSCRIBE = 8,
+    UMDP_CMD_INTERRUPT_UNSUBSCRIBE = 9,
     __UMDP_CMD_MAX,
 };
 #define UMDP_CMD_MAX (__UMDP_CMD_MAX - 1)
@@ -60,6 +62,14 @@ static struct nla_policy umdp_genl_echo_policy[UMDP_ATTR_MAX + 1] = {
             .type = NLA_NUL_STRING,
         },
 };
+
+static struct nla_policy umdp_genl_connect_policy[UMDP_ATTR_MAX + 1] = {
+    [UMDP_ATTR_S32] =
+        {
+            .type = NLA_S32,
+        },
+};
+static_assert(sizeof(pid_t) == sizeof(s32));
 
 static struct nla_policy umdp_genl_devio_policy[UMDP_ATTR_MAX + 1] = {
     [UMDP_ATTR_U8] =
@@ -88,6 +98,7 @@ static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_MAX + 1] = {
 };
 
 static int umdp_echo(struct sk_buff* skb, struct genl_info* info);
+static int umdp_connect(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info);
@@ -103,6 +114,13 @@ static const struct genl_ops umdp_genl_ops[] = {
         .flags = 0,
         .policy = umdp_genl_echo_policy,
         .doit = umdp_echo,
+        .dumpit = NULL,
+    },
+    {
+        .cmd = UMDP_CMD_CONNECT,
+        .flags = 0,
+        .policy = umdp_genl_connect_policy,
+        .doit = umdp_connect,
         .dumpit = NULL,
     },
     {
@@ -305,6 +323,62 @@ static bool check_process_for_netlink_socket_with_port_id(struct pid* pid, u32 p
     put_task_struct(task);
 
     return result != 0;
+}
+
+static int umdp_connect(struct sk_buff* skb, struct genl_info* info) {
+    printk(KERN_DEBUG "umdp: received connect request from portid %u\n", info->snd_portid);
+
+    struct nlattr* pid_attr = find_attribute(info->attrs, UMDP_ATTR_S32);
+    if (pid_attr == NULL) {
+        printk(KERN_ERR "umdp: did not find PID attribute in echo request\n");
+        return -EINVAL;
+    }
+    s32 pid_number = *(s32*) nla_data(pid_attr);
+
+    struct pid* pid = find_get_pid(pid_number);
+    bool found = check_process_for_netlink_socket_with_port_id(pid, info->snd_portid);
+
+    bool registered = false;
+    if (found) {
+        printk(KERN_DEBUG "umdp: connect request was from pid %d\n", pid_number);
+        down_write(&client_info_lock);
+        registered = register_client_if_not_registered(info->snd_portid, pid);
+        up_write(&client_info_lock);
+    }
+
+    if (!registered) {
+        put_pid(pid);
+    }
+
+    struct sk_buff* reply = genlmsg_new(nla_total_size(sizeof(u8)), GFP_KERNEL);
+    if (reply == NULL) {
+        printk(KERN_ERR "umdp: failed to allocate buffer for connect reply\n");
+        return -ENOMEM;
+    }
+
+    void* reply_header = genlmsg_put_reply(reply, info, &umdp_genl_family, 0, UMDP_CMD_CONNECT);
+    if (reply_header == NULL) {
+        nlmsg_free(reply);
+        printk(KERN_ERR "umdp: failed to add the generic netlink header to the connect reply\n");
+        return -EMSGSIZE;
+    }
+
+    u8 value = registered ? 1 : 0;
+    int ret = nla_put_u8(reply, UMDP_ATTR_U8, value);
+    if (ret != 0) {
+        nlmsg_free(reply);
+        printk(KERN_ERR "umdp: failed to write value to reply\n");
+        return ret;
+    }
+
+    genlmsg_end(reply, reply_header);
+    ret = genlmsg_reply(reply, info);
+    if (ret != 0) {
+        printk(KERN_ERR "umdp: failed to send connect reply\n");
+        return ret;
+    }
+
+    return 0;
 }
 
 struct devio_region {

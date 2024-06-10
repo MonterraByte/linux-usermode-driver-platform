@@ -1,6 +1,7 @@
 #include "connection.h"
 
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <netlink/socket.h>
 
@@ -36,6 +37,8 @@ bool irq_queue_pop(irq_queue* queue, uint32_t* out) {
 
 void umdp_connection_init(umdp_connection* connection) {
     connection->socket = NULL;
+    connection->owner_pid = getpid();
+    connection->connect_command_result = CONNECT_RESULT_NONE;
     connection->subscribed_irqs = NULL;
     connection->subscribed_irq_count = 0;
     connection->received_echo = NULL;

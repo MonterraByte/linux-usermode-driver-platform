@@ -1,5 +1,6 @@
 #include "umdp.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,14 @@ static struct nla_policy umdp_genl_echo_policy[UMDP_ATTR_MAX + 1] = {
             .type = NLA_NUL_STRING,
         },
 };
+
+static struct nla_policy umdp_genl_connect_policy[UMDP_ATTR_MAX + 1] = {
+    [UMDP_ATTR_S32] =
+        {
+            .type = NLA_S32,
+        },
+};
+static_assert(sizeof(pid_t) == sizeof(uint32_t), "sizeof(pid_t) == sizeof(uint32_t)");
 
 static struct nla_policy umdp_genl_devio_policy[UMDP_ATTR_MAX + 1] = {
     [UMDP_ATTR_U8] =
@@ -55,6 +64,13 @@ static struct genl_cmd umdp_cmds[] = {
         .c_maxattr = UMDP_ATTR_MAX,
         .c_attr_policy = umdp_genl_echo_policy,
         .c_msg_parser = umdp_echo_handler,
+    },
+    {
+        .c_id = UMDP_CMD_CONNECT,
+        .c_name = "UMDP_CMD_CONNECT",
+        .c_maxattr = UMDP_ATTR_MAX,
+        .c_attr_policy = umdp_genl_connect_policy,
+        .c_msg_parser = umdp_connect_handler,
     },
     {
         .c_id = UMDP_CMD_DEVIO_READ,
@@ -107,6 +123,53 @@ static struct genl_ops umdp_family = {
     .o_cmds = umdp_cmds,
     .o_ncmds = sizeof(umdp_cmds) / sizeof(struct genl_cmd),
 };
+
+static int umdp_connect_command(umdp_connection* connection) {
+    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(pid_t)));
+    if (msg == NULL) {
+        print_err("failed to allocate memory\n");
+        return ENOMEM;
+    }
+
+    if (genlmsg_put(
+            msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, UMDP_CMD_CONNECT, UMDP_GENL_VERSION)
+        == NULL) {
+        print_err("failed to write netlink headers\n");
+        nlmsg_free(msg);
+        return -NLE_NOMEM;
+    }
+
+    int ret = nla_put_s32(msg, UMDP_ATTR_S32, connection->owner_pid);
+    if (ret != 0) {
+        printf_err("failed to write pid: %s\n", nl_geterror(ret));
+        nlmsg_free(msg);
+        return ret;
+    }
+
+    ret = nl_send_auto(connection->socket, msg);
+    nlmsg_free(msg);
+    if (ret < 0) {
+        printf_err("failed to send device IO write request: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    do {
+        ret = nl_recvmsgs_default(connection->socket);
+        if (ret != 0) {
+            printf_err("failed to receive reply: %s\n", nl_geterror(ret));
+            return ret;
+        }
+    } while (connection->connect_command_result == CONNECT_RESULT_NONE);
+
+    if (connection->connect_command_result == CONNECT_RESULT_FAILURE) {
+        print_err(
+            "failed to register process (either it was already registered, or the kernel module encountered an "
+            "error)\n");
+        return -NLE_FAILURE;
+    }
+
+    return 0;
+}
 
 umdp_connection* umdp_connect(void) {
     int ret = genl_register_family(&umdp_family);
@@ -162,6 +225,12 @@ umdp_connection* umdp_connect(void) {
     ret = nl_socket_add_membership(connection->socket, interrupt_multicast_group);
     if (ret != 0) {
         printf_err("failed to register to multicast group: %s\n", nl_geterror(ret));
+        goto failure;
+    }
+
+    ret = umdp_connect_command(connection);
+    if (ret != 0) {
+        printf_err("failed to send connect command: %s\n", nl_geterror(ret));
         goto failure;
     }
 

@@ -3,10 +3,17 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <sys/types.h>
 
 #include "umdp.h"
 
 #define IRQ_QUEUE_SIZE 32
+
+enum connect_command_result {
+    CONNECT_RESULT_NONE,
+    CONNECT_RESULT_SUCCESS,
+    CONNECT_RESULT_FAILURE,
+};
 
 enum devio_value_type {
     DEVIO_VALUE_NONE,
@@ -37,6 +44,8 @@ bool irq_queue_pop(irq_queue* queue, uint32_t* out);
 
 struct umdp_connection {
     struct nl_sock* socket;
+    pid_t owner_pid;
+    enum connect_command_result connect_command_result;
 
     uint32_t* subscribed_irqs;
     size_t subscribed_irq_count;

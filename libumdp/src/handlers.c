@@ -44,6 +44,21 @@ int umdp_echo_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,
     return NL_SKIP;
 }
 
+int umdp_connect_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,
+    __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
+    umdp_connection* connection = arg;
+
+    struct nlattr* result_attr = find_attribute(info->attrs, UMDP_ATTR_U8);
+    if (result_attr == NULL) {
+        print_err("received connect reply without a result attribute\n");
+        return NL_SKIP;
+    }
+
+    uint8_t result = *((uint8_t*) nla_data(result_attr));
+    connection->connect_command_result = result == 1 ? CONNECT_RESULT_SUCCESS : CONNECT_RESULT_FAILURE;
+    return NL_SKIP;
+}
+
 int umdp_devio_read_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,
     __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
     umdp_connection* connection = arg;
