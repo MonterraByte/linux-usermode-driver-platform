@@ -207,11 +207,13 @@ char* umdp_echo(umdp_connection* connection, char* string) {
     }
     nlmsg_free(msg);
 
-    ret = nl_recvmsgs_default(connection->socket);
-    if (ret != 0) {
-        printf_err("failed to receive reply: %s\n", nl_geterror(ret));
-        return NULL;
-    }
+    do {
+        ret = nl_recvmsgs_default(connection->socket);
+        if (ret != 0) {
+            printf_err("failed to receive reply: %s\n", nl_geterror(ret));
+            return NULL;
+        }
+    } while (connection->received_echo == NULL);
 
     size_t length = strlen(connection->received_echo) + 1;
     char* copy = malloc(length);
