@@ -319,6 +319,9 @@ static int check_if_open_file_is_netlink_socket_with_port_id(
 
 static bool check_process_for_netlink_socket_with_port_id(struct pid* pid, u32 port_id) {
     struct task_struct* task = get_pid_task(pid, PIDTYPE_PID);
+    if (task == NULL) {
+        return false;
+    }
     int result = iterate_fd(task->files, 0, check_if_open_file_is_netlink_socket_with_port_id, &port_id);
     put_task_struct(task);
 
