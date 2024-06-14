@@ -1,6 +1,6 @@
 project('umdp', 'c',
   version : '0.1',
-  default_options : ['c_std=c11', 'buildtype=debugoptimized', 'warning_level=3'])
+  default_options : ['c_std=c11', 'buildtype=debugoptimized', 'b_lto=true', 'default_library=both', 'warning_level=3'])
 
 nl_dep = dependency('libnl-3.0', version: '>=3.5.0')
 genl_dep = dependency('libnl-genl-3.0', version: '>=3.5.0')
