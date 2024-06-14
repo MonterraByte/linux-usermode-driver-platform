@@ -13,7 +13,7 @@ if get_option('disable_error_printing')
 endif
 
 incdir = include_directories('include')
-umdp_lib = library('umdp', 'src/umdp.c', 'src/connection.c', 'src/handlers.c',
+umdp_lib = library('umdp', 'src/umdp.c', 'src/connection.c', 'src/handlers.c', 'src/protocol-family.c',
   c_args: lib_args,
   include_directories: incdir,
   dependencies: [nl_dep, genl_dep],

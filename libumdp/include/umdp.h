@@ -61,7 +61,7 @@ UMDP_PUBLIC char* umdp_echo(umdp_connection* connection, char* string);
 /// \param start The first I/O port of the desired region
 /// \param size The size of the region (must be greater than 0)
 /// \return 0 in case of success, a non-zero value in case of failure
-UMDP_PUBLIC int umdp_devio_request(umdp_connection* connection, uint64_t start, uint32_t size);
+UMDP_PUBLIC int umdp_devio_request(umdp_connection* connection, uint64_t start, uint64_t size);
 
 /// Release an I/O port region.
 ///
@@ -71,7 +71,7 @@ UMDP_PUBLIC int umdp_devio_request(umdp_connection* connection, uint64_t start, 
 /// \param start The first I/O port of the desired region
 /// \param size The size of the region (must be greater than 0)
 /// \return 0 in case of success, a non-zero value in case of failure
-UMDP_PUBLIC int umdp_devio_release(umdp_connection* connection, uint64_t start, uint32_t size);
+UMDP_PUBLIC int umdp_devio_release(umdp_connection* connection, uint64_t start, uint64_t size);
 
 
 /// Read a byte from the specified port.

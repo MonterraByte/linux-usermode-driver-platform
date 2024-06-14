@@ -26,19 +26,6 @@ MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
 #define UMDP_WORKQUEUE_NAME "umdp_wq"
 #define UMDP_WORKER_COUNT 32
 
-/* attributes */
-enum {
-    UMDP_ATTR_UNSPEC __attribute__((unused)) = 0,
-    UMDP_ATTR_MSG = 1,
-    UMDP_ATTR_U8 = 2,
-    UMDP_ATTR_U16 = 3,
-    UMDP_ATTR_U32 = 4,
-    UMDP_ATTR_U64 = 5,
-    UMDP_ATTR_S32 = 6,
-    __UMDP_ATTR_MAX,
-};
-#define UMDP_ATTR_MAX (__UMDP_ATTR_MAX - 1)
-
 /* commands */
 enum {
     UMDP_CMD_UNSPEC __attribute__((unused)) = 0,
@@ -55,43 +42,147 @@ enum {
 };
 #define UMDP_CMD_MAX (__UMDP_CMD_MAX - 1)
 
-/* attribute policy */
-static struct nla_policy umdp_genl_echo_policy[UMDP_ATTR_MAX + 1] = {
-    [UMDP_ATTR_MSG] =
+// Should be updated as needed when attributes are added/removed.
+// The `static_assert`s make sure the value it at least correct.
+#define UMDP_ATTR_MAX 5
+
+// echo attributes
+enum {
+    UMDP_ATTR_ECHO_UNSPEC __attribute__((unused)) = 0,
+    UMDP_ATTR_ECHO_MSG = 1,
+    __UMDP_ATTR_ECHO_MAX,
+};
+#define UMDP_ATTR_ECHO_MAX (__UMDP_ATTR_ECHO_MAX - 1)
+static_assert(UMDP_ATTR_ECHO_MAX <= UMDP_ATTR_MAX);
+
+static struct nla_policy umdp_genl_echo_policy[UMDP_ATTR_ECHO_MAX + 1] = {
+    [UMDP_ATTR_ECHO_MSG] =
         {
             .type = NLA_NUL_STRING,
         },
 };
 
-static struct nla_policy umdp_genl_connect_policy[UMDP_ATTR_MAX + 1] = {
-    [UMDP_ATTR_S32] =
+// connect attributes
+enum {
+    UMDP_ATTR_CONNECT_UNSPEC __attribute__((unused)) = 0,
+    UMDP_ATTR_CONNECT_PID = 1,
+    UMDP_ATTR_CONNECT_REPLY = 2,
+    __UMDP_ATTR_CONNECT_MAX,
+};
+#define UMDP_ATTR_CONNECT_MAX (__UMDP_ATTR_CONNECT_MAX - 1)
+static_assert(UMDP_ATTR_CONNECT_MAX <= UMDP_ATTR_MAX);
+
+static struct nla_policy umdp_genl_connect_policy[UMDP_ATTR_CONNECT_MAX + 1] = {
+    [UMDP_ATTR_CONNECT_PID] =
         {
             .type = NLA_S32,
+        },
+    [UMDP_ATTR_CONNECT_REPLY] =
+        {
+            .type = NLA_U8,
         },
 };
 static_assert(sizeof(pid_t) == sizeof(s32));
 
-static struct nla_policy umdp_genl_devio_policy[UMDP_ATTR_MAX + 1] = {
-    [UMDP_ATTR_U8] =
+// devio read attributes
+enum {
+    UMDP_ATTR_DEVIO_READ_UNSPEC __attribute__((unused)) = 0,
+    UMDP_ATTR_DEVIO_READ_PORT = 1,
+    UMDP_ATTR_DEVIO_READ_TYPE = 2,
+    UMDP_ATTR_DEVIO_READ_REPLY_U8 = 3,
+    UMDP_ATTR_DEVIO_READ_REPLY_U16 = 4,
+    UMDP_ATTR_DEVIO_READ_REPLY_U32 = 5,
+    __UMDP_ATTR_DEVIO_READ_MAX,
+};
+#define UMDP_ATTR_DEVIO_READ_MAX (__UMDP_ATTR_DEVIO_READ_MAX - 1)
+static_assert(UMDP_ATTR_DEVIO_READ_MAX <= UMDP_ATTR_MAX);
+
+static struct nla_policy umdp_genl_devio_read_policy[UMDP_ATTR_DEVIO_READ_MAX + 1] = {
+    [UMDP_ATTR_DEVIO_READ_PORT] =
+        {
+            .type = NLA_U64,
+        },
+    [UMDP_ATTR_DEVIO_READ_TYPE] =
         {
             .type = NLA_U8,
         },
-    [UMDP_ATTR_U16] =
+    [UMDP_ATTR_DEVIO_READ_REPLY_U8] =
+        {
+            .type = NLA_U8,
+        },
+    [UMDP_ATTR_DEVIO_READ_REPLY_U16] =
         {
             .type = NLA_U16,
         },
-    [UMDP_ATTR_U32] =
+    [UMDP_ATTR_DEVIO_READ_REPLY_U32] =
         {
             .type = NLA_U32,
         },
-    [UMDP_ATTR_U64] =
+};
+
+// devio write attributes
+enum {
+    UMDP_ATTR_DEVIO_WRITE_UNSPEC __attribute__((unused)) = 0,
+    UMDP_ATTR_DEVIO_WRITE_PORT = 1,
+    UMDP_ATTR_DEVIO_WRITE_VALUE_U8 = 2,
+    UMDP_ATTR_DEVIO_WRITE_VALUE_U16 = 3,
+    UMDP_ATTR_DEVIO_WRITE_VALUE_U32 = 4,
+    __UMDP_ATTR_DEVIO_WRITE_MAX,
+};
+#define UMDP_ATTR_DEVIO_WRITE_MAX (__UMDP_ATTR_DEVIO_WRITE_MAX - 1)
+static_assert(UMDP_ATTR_DEVIO_WRITE_MAX <= UMDP_ATTR_MAX);
+
+static struct nla_policy umdp_genl_devio_write_policy[UMDP_ATTR_DEVIO_WRITE_MAX + 1] = {
+    [UMDP_ATTR_DEVIO_WRITE_PORT] =
+        {
+            .type = NLA_U64,
+        },
+    [UMDP_ATTR_DEVIO_WRITE_VALUE_U8] =
+        {
+            .type = NLA_U8,
+        },
+    [UMDP_ATTR_DEVIO_WRITE_VALUE_U16] =
+        {
+            .type = NLA_U16,
+        },
+    [UMDP_ATTR_DEVIO_WRITE_VALUE_U32] =
+        {
+            .type = NLA_U32,
+        },
+};
+
+// devio request attributes
+enum {
+    UMDP_ATTR_DEVIO_REQUEST_UNSPEC __attribute__((unused)) = 0,
+    UMDP_ATTR_DEVIO_REQUEST_START = 1,
+    UMDP_ATTR_DEVIO_REQUEST_SIZE = 2,
+    __UMDP_ATTR_DEVIO_REQUEST_MAX,
+};
+#define UMDP_ATTR_DEVIO_REQUEST_MAX (__UMDP_ATTR_DEVIO_REQUEST_MAX - 1)
+static_assert(UMDP_ATTR_DEVIO_REQUEST_MAX <= UMDP_ATTR_MAX);
+
+static struct nla_policy umdp_genl_devio_request_policy[UMDP_ATTR_DEVIO_REQUEST_MAX + 1] = {
+    [UMDP_ATTR_DEVIO_REQUEST_START] =
+        {
+            .type = NLA_U64,
+        },
+    [UMDP_ATTR_DEVIO_REQUEST_SIZE] =
         {
             .type = NLA_U64,
         },
 };
 
-static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_MAX + 1] = {
-    [UMDP_ATTR_U32] =
+// interrupt attributes
+enum {
+    UMDP_ATTR_INTERRUPT_UNSPEC __attribute__((unused)) = 0,
+    UMDP_ATTR_INTERRUPT_IRQ = 1,
+    __UMDP_ATTR_INTERRUPT_MAX,
+};
+#define UMDP_ATTR_INTERRUPT_MAX (__UMDP_ATTR_INTERRUPT_MAX - 1)
+static_assert(UMDP_ATTR_INTERRUPT_MAX <= UMDP_ATTR_MAX);
+
+static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_INTERRUPT_MAX + 1] = {
+    [UMDP_ATTR_INTERRUPT_IRQ] =
         {
             .type = NLA_U32,
         },
@@ -112,6 +203,7 @@ static const struct genl_ops umdp_genl_ops[] = {
     {
         .cmd = UMDP_CMD_ECHO,
         .flags = 0,
+        .maxattr = UMDP_ATTR_ECHO_MAX,
         .policy = umdp_genl_echo_policy,
         .doit = umdp_echo,
         .dumpit = NULL,
@@ -119,6 +211,7 @@ static const struct genl_ops umdp_genl_ops[] = {
     {
         .cmd = UMDP_CMD_CONNECT,
         .flags = 0,
+        .maxattr = UMDP_ATTR_CONNECT_MAX,
         .policy = umdp_genl_connect_policy,
         .doit = umdp_connect,
         .dumpit = NULL,
@@ -126,34 +219,39 @@ static const struct genl_ops umdp_genl_ops[] = {
     {
         .cmd = UMDP_CMD_DEVIO_READ,
         .flags = 0,
-        .policy = umdp_genl_devio_policy,
+        .maxattr = UMDP_ATTR_DEVIO_READ_MAX,
+        .policy = umdp_genl_devio_read_policy,
         .doit = umdp_devio_read,
         .dumpit = NULL,
     },
     {
         .cmd = UMDP_CMD_DEVIO_WRITE,
         .flags = 0,
-        .policy = umdp_genl_devio_policy,
+        .maxattr = UMDP_ATTR_DEVIO_WRITE_MAX,
+        .policy = umdp_genl_devio_write_policy,
         .doit = umdp_devio_write,
         .dumpit = NULL,
     },
     {
         .cmd = UMDP_CMD_DEVIO_REQUEST,
         .flags = 0,
-        .policy = umdp_genl_devio_policy,
+        .maxattr = UMDP_ATTR_DEVIO_REQUEST_MAX,
+        .policy = umdp_genl_devio_request_policy,
         .doit = umdp_devio_request,
         .dumpit = NULL,
     },
     {
         .cmd = UMDP_CMD_DEVIO_RELEASE,
         .flags = 0,
-        .policy = umdp_genl_devio_policy,
+        .maxattr = UMDP_ATTR_DEVIO_REQUEST_MAX,
+        .policy = umdp_genl_devio_request_policy,
         .doit = umdp_devio_release,
         .dumpit = NULL,
     },
     {
         .cmd = UMDP_CMD_INTERRUPT_NOTIFICATION,
         .flags = 0,
+        .maxattr = UMDP_ATTR_INTERRUPT_MAX,
         .policy = umdp_genl_interrupt_policy,
         .doit = umdp_interrupt_notification,
         .dumpit = NULL,
@@ -161,6 +259,7 @@ static const struct genl_ops umdp_genl_ops[] = {
     {
         .cmd = UMDP_CMD_INTERRUPT_SUBSCRIBE,
         .flags = 0,
+        .maxattr = UMDP_ATTR_INTERRUPT_MAX,
         .policy = umdp_genl_interrupt_policy,
         .doit = umdp_interrupt_subscribe,
         .dumpit = NULL,
@@ -168,6 +267,7 @@ static const struct genl_ops umdp_genl_ops[] = {
     {
         .cmd = UMDP_CMD_INTERRUPT_UNSUBSCRIBE,
         .flags = 0,
+        .maxattr = UMDP_ATTR_INTERRUPT_MAX,
         .policy = umdp_genl_interrupt_policy,
         .doit = umdp_interrupt_unsubscribe,
         .dumpit = NULL,
@@ -204,7 +304,7 @@ static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
 static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
     printk(KERN_DEBUG "umdp: received echo request\n");
 
-    struct nlattr* msg_attr = find_attribute(info->attrs, UMDP_ATTR_MSG);
+    struct nlattr* msg_attr = find_attribute(info->attrs, UMDP_ATTR_ECHO_MSG);
     if (msg_attr == NULL) {
         printk(KERN_ERR "umdp: did not find message attribute in echo request\n");
         return -EINVAL;
@@ -223,7 +323,7 @@ static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
         return -EMSGSIZE;
     }
 
-    int ret = nla_put_string(reply, UMDP_ATTR_MSG, nla_data(msg_attr));
+    int ret = nla_put_string(reply, UMDP_ATTR_ECHO_MSG, nla_data(msg_attr));
     if (ret != 0) {
         nlmsg_free(reply);
         printk(KERN_ERR "umdp: failed to write string to the echo reply\n");
@@ -325,7 +425,7 @@ static bool check_process_for_netlink_socket_with_port_id(struct pid* pid, u32 p
 static int umdp_connect(struct sk_buff* skb, struct genl_info* info) {
     printk(KERN_DEBUG "umdp: received connect request from portid %u\n", info->snd_portid);
 
-    struct nlattr* pid_attr = find_attribute(info->attrs, UMDP_ATTR_S32);
+    struct nlattr* pid_attr = find_attribute(info->attrs, UMDP_ATTR_CONNECT_PID);
     if (pid_attr == NULL) {
         printk(KERN_ERR "umdp: did not find PID attribute in echo request\n");
         return -EINVAL;
@@ -361,7 +461,7 @@ static int umdp_connect(struct sk_buff* skb, struct genl_info* info) {
     }
 
     u8 value = registered ? 1 : 0;
-    int ret = nla_put_u8(reply, UMDP_ATTR_U8, value);
+    int ret = nla_put_u8(reply, UMDP_ATTR_CONNECT_REPLY, value);
     if (ret != 0) {
         nlmsg_free(reply);
         printk(KERN_ERR "umdp: failed to write value to reply\n");
@@ -416,7 +516,7 @@ static bool is_ioport_allocated(u64 port) {
 static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
     printk(KERN_DEBUG "umdp: received device IO read request\n");
 
-    struct nlattr* port_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
+    struct nlattr* port_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_READ_PORT);
     if (port_attr == NULL) {
         printk(KERN_ERR "umdp: invalid device IO read request: port attribute is missing\n");
         return -EINVAL;
@@ -433,7 +533,7 @@ static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
 
     mutex_unlock(&devio_data_mutex);
 
-    struct nlattr* type_attr = find_attribute(info->attrs, UMDP_ATTR_U8);
+    struct nlattr* type_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_READ_TYPE);
     if (type_attr == NULL) {
         printk(KERN_ERR "umdp: invalid device IO read request: type attribute is missing\n");
         return -EINVAL;
@@ -441,13 +541,13 @@ static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
 
     int reply_size;
     switch (*(u8*) nla_data(type_attr)) {
-        case UMDP_ATTR_U8:
+        case UMDP_ATTR_DEVIO_READ_REPLY_U8:
             reply_size = sizeof(u8);
             break;
-        case UMDP_ATTR_U16:
+        case UMDP_ATTR_DEVIO_READ_REPLY_U16:
             reply_size = sizeof(u16);
             break;
-        case UMDP_ATTR_U32:
+        case UMDP_ATTR_DEVIO_READ_REPLY_U32:
             reply_size = sizeof(u32);
             break;
         default:
@@ -473,19 +573,19 @@ static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
         case sizeof(u8): {
             u8 value = inb(port);
             printk(KERN_DEBUG "umdp: read %u (%x) from port %llu\n", value, value, port);
-            ret = nla_put_u8(reply, UMDP_ATTR_U8, value);
+            ret = nla_put_u8(reply, UMDP_ATTR_DEVIO_READ_REPLY_U8, value);
             break;
         }
         case sizeof(u16): {
             u16 value = inw(port);
             printk(KERN_DEBUG "umdp: read %u (%x) from port %llu\n", value, value, port);
-            ret = nla_put_u16(reply, UMDP_ATTR_U16, value);
+            ret = nla_put_u16(reply, UMDP_ATTR_DEVIO_READ_REPLY_U16, value);
             break;
         }
         case sizeof(u32): {
             u32 value = inl(port);
             printk(KERN_DEBUG "umdp: read %u (%x) from port %llu\n", value, value, port);
-            ret = nla_put_u32(reply, UMDP_ATTR_U32, value);
+            ret = nla_put_u32(reply, UMDP_ATTR_DEVIO_READ_REPLY_U32, value);
             break;
         }
         default:
@@ -513,7 +613,7 @@ static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
 static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
     printk(KERN_DEBUG "umdp: received device IO write request\n");
 
-    struct nlattr* port_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
+    struct nlattr* port_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_WRITE_PORT);
     if (port_attr == NULL) {
         printk(KERN_ERR "umdp: invalid device IO write request: port attribute is missing\n");
         return -EINVAL;
@@ -531,25 +631,25 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
     mutex_unlock(&devio_data_mutex);
 
     int i;
-    for (i = 0; i < UMDP_ATTR_MAX + 1; i++) {
+    for (i = 0; i < UMDP_ATTR_DEVIO_WRITE_MAX + 1; i++) {
         if (info->attrs[i] == NULL) {
             continue;
         }
 
         switch (nla_type(info->attrs[i])) {
-            case UMDP_ATTR_U8: {
+            case UMDP_ATTR_DEVIO_WRITE_VALUE_U8: {
                 u8 value = *((u8*) nla_data(info->attrs[i]));
                 printk(KERN_DEBUG "umdp: writing %u (%x) to port %llu\n", value, value, port);
                 outb(value, port);
                 return 0;
             }
-            case UMDP_ATTR_U16: {
+            case UMDP_ATTR_DEVIO_WRITE_VALUE_U16: {
                 u16 value = *((u16*) nla_data(info->attrs[i]));
                 printk(KERN_DEBUG "umdp: writing %u (%x) to port %llu\n", value, value, port);
                 outw(value, port);
                 return 0;
             }
-            case UMDP_ATTR_U32: {
+            case UMDP_ATTR_DEVIO_WRITE_VALUE_U32: {
                 u32 value = *((u32*) nla_data(info->attrs[i]));
                 printk(KERN_DEBUG "umdp: writing %u (%x) to port %llu\n", value, value, port);
                 outl(value, port);
@@ -565,8 +665,8 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
 }
 
 static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
-    struct nlattr* start_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
-    struct nlattr* size_attr = find_attribute(info->attrs, UMDP_ATTR_U32);
+    struct nlattr* start_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_REQUEST_START);
+    struct nlattr* size_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_REQUEST_SIZE);
 
     if (start_attr == NULL || size_attr == NULL) {
         printk(KERN_ERR "umdp: invalid IO region request\n");
@@ -574,7 +674,7 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
     }
     struct devio_region region = {
         .start = *((u64*) nla_data(start_attr)),
-        .size = *((u32*) nla_data(size_attr)),
+        .size = *((u64*) nla_data(size_attr)),
     };
     printk(KERN_DEBUG "umdp: received request for region %llu - %llu\n", region.start, region.start + region.size - 1);
     if (region.size == 0) {
@@ -616,8 +716,8 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
 }
 
 static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
-    struct nlattr* start_attr = find_attribute(info->attrs, UMDP_ATTR_U64);
-    struct nlattr* size_attr = find_attribute(info->attrs, UMDP_ATTR_U32);
+    struct nlattr* start_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_REQUEST_START);
+    struct nlattr* size_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_REQUEST_SIZE);
 
     if (start_attr == NULL || size_attr == NULL) {
         printk(KERN_ERR "umdp: invalid IO region release request\n");
@@ -625,7 +725,7 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
     }
     struct devio_region region = {
         .start = *((u64*) nla_data(start_attr)),
-        .size = *((u32*) nla_data(size_attr)),
+        .size = *((u64*) nla_data(size_attr)),
     };
     printk(KERN_DEBUG "umdp: received release request for region %llu - %llu\n", region.start,
         region.start + region.size - 1);
@@ -701,7 +801,7 @@ void interrupt_handler_wq(struct work_struct* ws) {
         return;
     }
 
-    if (nla_put_u32(msg, UMDP_ATTR_U32, work->irq) != 0) {
+    if (nla_put_u32(msg, UMDP_ATTR_INTERRUPT_IRQ, work->irq) != 0) {
         nlmsg_free(msg);
         printk(KERN_ERR "umdp: failed to write value to interrupt notification (this is a bug)\n");
         work->busy = false;
@@ -725,7 +825,7 @@ void interrupt_handler_wq(struct work_struct* ws) {
 }
 
 static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info) {
-    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_U32);
+    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_INTERRUPT_IRQ);
     if (irq_attr == NULL) {
         printk(KERN_ERR "umdp: invalid interrupt subscription request: IRQ attribute is missing\n");
         return -EINVAL;
@@ -766,7 +866,7 @@ static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info)
 }
 
 static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* info) {
-    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_U32);
+    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_INTERRUPT_IRQ);
     if (irq_attr == NULL) {
         printk(KERN_ERR "umdp: invalid interrupt subscription request: IRQ attribute is missing\n");
         return -EINVAL;

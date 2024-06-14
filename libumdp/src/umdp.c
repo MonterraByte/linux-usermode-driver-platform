@@ -1,6 +1,5 @@
 #include "umdp.h"
 
-#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,116 +12,8 @@
 
 #include "connection.h"
 #include "error.h"
-#include "handlers.h"
 #include "protocol.h"
-
-static struct nla_policy umdp_genl_echo_policy[UMDP_ATTR_MAX + 1] = {
-    [UMDP_ATTR_MSG] =
-        {
-            .type = NLA_NUL_STRING,
-        },
-};
-
-static struct nla_policy umdp_genl_connect_policy[UMDP_ATTR_MAX + 1] = {
-    [UMDP_ATTR_S32] =
-        {
-            .type = NLA_S32,
-        },
-};
-static_assert(sizeof(pid_t) == sizeof(uint32_t), "sizeof(pid_t) == sizeof(uint32_t)");
-
-static struct nla_policy umdp_genl_devio_policy[UMDP_ATTR_MAX + 1] = {
-    [UMDP_ATTR_U8] =
-        {
-            .type = NLA_U8,
-        },
-    [UMDP_ATTR_U16] =
-        {
-            .type = NLA_U16,
-        },
-    [UMDP_ATTR_U32] =
-        {
-            .type = NLA_U32,
-        },
-    [UMDP_ATTR_U64] =
-        {
-            .type = NLA_U64,
-        },
-};
-
-static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_MAX + 1] = {
-    [UMDP_ATTR_U32] =
-        {
-            .type = NLA_U32,
-        },
-};
-
-static struct genl_cmd umdp_cmds[] = {
-    {
-        .c_id = UMDP_CMD_ECHO,
-        .c_name = "UMDP_CMD_ECHO",
-        .c_maxattr = UMDP_ATTR_MAX,
-        .c_attr_policy = umdp_genl_echo_policy,
-        .c_msg_parser = umdp_echo_handler,
-    },
-    {
-        .c_id = UMDP_CMD_CONNECT,
-        .c_name = "UMDP_CMD_CONNECT",
-        .c_maxattr = UMDP_ATTR_MAX,
-        .c_attr_policy = umdp_genl_connect_policy,
-        .c_msg_parser = umdp_connect_handler,
-    },
-    {
-        .c_id = UMDP_CMD_DEVIO_READ,
-        .c_name = "UMDP_CMD_DEVIO_READ",
-        .c_maxattr = UMDP_ATTR_MAX,
-        .c_attr_policy = umdp_genl_devio_policy,
-        .c_msg_parser = umdp_devio_read_handler,
-    },
-    {
-        .c_id = UMDP_CMD_DEVIO_WRITE,
-        .c_name = "UMDP_CMD_DEVIO_WRITE",
-        .c_maxattr = UMDP_ATTR_MAX,
-        .c_attr_policy = umdp_genl_devio_policy,
-    },
-    {
-        .c_id = UMDP_CMD_DEVIO_REQUEST,
-        .c_name = "UMDP_CMD_DEVIO_REQUEST",
-        .c_maxattr = UMDP_ATTR_MAX,
-        .c_attr_policy = umdp_genl_devio_policy,
-    },
-    {
-        .c_id = UMDP_CMD_DEVIO_RELEASE,
-        .c_name = "UMDP_CMD_DEVIO_RELEASE",
-        .c_maxattr = UMDP_ATTR_MAX,
-        .c_attr_policy = umdp_genl_devio_policy,
-    },
-    {
-        .c_id = UMDP_CMD_INTERRUPT_NOTIFICATION,
-        .c_name = "UMDP_CMD_INTERRUPT_NOTIFICATION",
-        .c_maxattr = UMDP_ATTR_MAX,
-        .c_attr_policy = umdp_genl_interrupt_policy,
-        .c_msg_parser = umdp_interrupt_handler,
-    },
-    {
-        .c_id = UMDP_CMD_INTERRUPT_SUBSCRIBE,
-        .c_name = "UMDP_CMD_INTERRUPT_SUBSCRIBE",
-        .c_maxattr = UMDP_ATTR_MAX,
-        .c_attr_policy = umdp_genl_interrupt_policy,
-    },
-    {
-        .c_id = UMDP_CMD_INTERRUPT_UNSUBSCRIBE,
-        .c_name = "UMDP_CMD_INTERRUPT_UNSUBSCRIBE",
-        .c_maxattr = UMDP_ATTR_MAX,
-        .c_attr_policy = umdp_genl_interrupt_policy,
-    },
-};
-
-static struct genl_ops umdp_family = {
-    .o_name = UMDP_GENL_NAME,
-    .o_cmds = umdp_cmds,
-    .o_ncmds = sizeof(umdp_cmds) / sizeof(struct genl_cmd),
-};
+#include "protocol-family.h"
 
 static int umdp_connect_command(umdp_connection* connection) {
     struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(pid_t)));
@@ -139,7 +30,7 @@ static int umdp_connect_command(umdp_connection* connection) {
         return -NLE_NOMEM;
     }
 
-    int ret = nla_put_s32(msg, UMDP_ATTR_S32, connection->owner_pid);
+    int ret = nla_put_s32(msg, UMDP_ATTR_CONNECT_PID, connection->owner_pid);
     if (ret != 0) {
         printf_err("failed to write pid: %s\n", nl_geterror(ret));
         nlmsg_free(msg);
@@ -263,7 +154,7 @@ char* umdp_echo(umdp_connection* connection, char* string) {
         goto msg_failure;
     }
 
-    int ret = nla_put_string(msg, UMDP_ATTR_MSG, string);
+    int ret = nla_put_string(msg, UMDP_ATTR_ECHO_MSG, string);
     if (ret != 0) {
         printf_err("failed to write string: %s\n", nl_geterror(ret));
         goto msg_failure;
@@ -316,14 +207,14 @@ static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t t
         return -NLE_NOMEM;
     }
 
-    int ret = nla_put_u64(msg, UMDP_ATTR_U64, port);
+    int ret = nla_put_u64(msg, UMDP_ATTR_DEVIO_READ_PORT, port);
     if (ret != 0) {
         printf_err("failed to write port: %s\n", nl_geterror(ret));
         nlmsg_free(msg);
         return ret;
     }
 
-    ret = nla_put_u8(msg, UMDP_ATTR_U8, type);
+    ret = nla_put_u8(msg, UMDP_ATTR_DEVIO_READ_TYPE, type);
     if (ret != 0) {
         printf_err("failed to write read size: %s\n", nl_geterror(ret));
         nlmsg_free(msg);
@@ -346,21 +237,21 @@ static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t t
         }
     }
 
-    if ((type == UMDP_ATTR_U8 && connection->received_devio_value.type != DEVIO_VALUE_U8)
-        || (type == UMDP_ATTR_U16 && connection->received_devio_value.type != DEVIO_VALUE_U16)
-        || (type == UMDP_ATTR_U32 && connection->received_devio_value.type != DEVIO_VALUE_U32)) {
+    if ((type == UMDP_ATTR_DEVIO_READ_REPLY_U8 && connection->received_devio_value.type != DEVIO_VALUE_U8)
+        || (type == UMDP_ATTR_DEVIO_READ_REPLY_U16 && connection->received_devio_value.type != DEVIO_VALUE_U16)
+        || (type == UMDP_ATTR_DEVIO_READ_REPLY_U32 && connection->received_devio_value.type != DEVIO_VALUE_U32)) {
         print_err("received value type does not match the expected type");
         return -1;
     }
 
     switch (type) {
-        case UMDP_ATTR_U8:
+        case UMDP_ATTR_DEVIO_READ_REPLY_U8:
             *((uint8_t*) out) = connection->received_devio_value.u8;
             break;
-        case UMDP_ATTR_U16:
+        case UMDP_ATTR_DEVIO_READ_REPLY_U16:
             *((uint16_t*) out) = connection->received_devio_value.u16;
             break;
-        case UMDP_ATTR_U32:
+        case UMDP_ATTR_DEVIO_READ_REPLY_U32:
             *((uint32_t*) out) = connection->received_devio_value.u32;
             break;
     }
@@ -370,27 +261,27 @@ static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t t
 }
 
 int umdp_devio_read_u8(umdp_connection* connection, uint64_t port, uint8_t* out) {
-    return umdp_devio_read(connection, port, UMDP_ATTR_U8, (void*) out);
+    return umdp_devio_read(connection, port, UMDP_ATTR_DEVIO_READ_REPLY_U8, (void*) out);
 }
 
 int umdp_devio_read_u16(umdp_connection* connection, uint64_t port, uint16_t* out) {
-    return umdp_devio_read(connection, port, UMDP_ATTR_U16, (void*) out);
+    return umdp_devio_read(connection, port, UMDP_ATTR_DEVIO_READ_REPLY_U16, (void*) out);
 }
 
 int umdp_devio_read_u32(umdp_connection* connection, uint64_t port, uint32_t* out) {
-    return umdp_devio_read(connection, port, UMDP_ATTR_U32, (void*) out);
+    return umdp_devio_read(connection, port, UMDP_ATTR_DEVIO_READ_REPLY_U32, (void*) out);
 }
 
 static int umdp_devio_write(umdp_connection* connection, uint64_t port, uint8_t type, void* value) {
     int value_size;
     switch (type) {
-        case UMDP_ATTR_U8:
+        case UMDP_ATTR_DEVIO_WRITE_VALUE_U8:
             value_size = sizeof(uint8_t);
             break;
-        case UMDP_ATTR_U16:
+        case UMDP_ATTR_DEVIO_WRITE_VALUE_U16:
             value_size = sizeof(uint16_t);
             break;
-        case UMDP_ATTR_U32:
+        case UMDP_ATTR_DEVIO_WRITE_VALUE_U32:
             value_size = sizeof(uint32_t);
             break;
         default:
@@ -412,7 +303,7 @@ static int umdp_devio_write(umdp_connection* connection, uint64_t port, uint8_t 
         return -NLE_NOMEM;
     }
 
-    int ret = nla_put_u64(msg, UMDP_ATTR_U64, port);
+    int ret = nla_put_u64(msg, UMDP_ATTR_DEVIO_WRITE_PORT, port);
     if (ret != 0) {
         printf_err("failed to write port: %s\n", nl_geterror(ret));
         nlmsg_free(msg);
@@ -420,14 +311,14 @@ static int umdp_devio_write(umdp_connection* connection, uint64_t port, uint8_t 
     }
 
     switch (type) {
-        case UMDP_ATTR_U8:
-            ret = nla_put_u8(msg, UMDP_ATTR_U8, *((uint8_t*) value));
+        case UMDP_ATTR_DEVIO_WRITE_VALUE_U8:
+            ret = nla_put_u8(msg, UMDP_ATTR_DEVIO_WRITE_VALUE_U8, *((uint8_t*) value));
             break;
-        case UMDP_ATTR_U16:
-            ret = nla_put_u16(msg, UMDP_ATTR_U16, *((uint16_t*) value));
+        case UMDP_ATTR_DEVIO_WRITE_VALUE_U16:
+            ret = nla_put_u16(msg, UMDP_ATTR_DEVIO_WRITE_VALUE_U16, *((uint16_t*) value));
             break;
-        case UMDP_ATTR_U32:
-            ret = nla_put_u32(msg, UMDP_ATTR_U32, *((uint32_t*) value));
+        case UMDP_ATTR_DEVIO_WRITE_VALUE_U32:
+            ret = nla_put_u32(msg, UMDP_ATTR_DEVIO_WRITE_VALUE_U32, *((uint32_t*) value));
             break;
         default:
             return EINVAL;
@@ -455,18 +346,18 @@ static int umdp_devio_write(umdp_connection* connection, uint64_t port, uint8_t 
 }
 
 int umdp_devio_write_u8(umdp_connection* connection, uint64_t port, uint8_t value) {
-    return umdp_devio_write(connection, port, UMDP_ATTR_U8, &value);
+    return umdp_devio_write(connection, port, UMDP_ATTR_DEVIO_WRITE_VALUE_U8, &value);
 }
 
 int umdp_devio_write_u16(umdp_connection* connection, uint64_t port, uint16_t value) {
-    return umdp_devio_write(connection, port, UMDP_ATTR_U16, &value);
+    return umdp_devio_write(connection, port, UMDP_ATTR_DEVIO_WRITE_VALUE_U16, &value);
 }
 
 int umdp_devio_write_u32(umdp_connection* connection, uint64_t port, uint32_t value) {
-    return umdp_devio_write(connection, port, UMDP_ATTR_U32, &value);
+    return umdp_devio_write(connection, port, UMDP_ATTR_DEVIO_WRITE_VALUE_U32, &value);
 }
 
-static int umdp_devio_region_request(umdp_connection* connection, uint64_t start, uint32_t size, uint8_t command) {
+static int umdp_devio_region_request(umdp_connection* connection, uint64_t start, uint64_t size, uint8_t command) {
     if (size == 0) {
         print_err("size cannot be 0\n");
         return EINVAL;
@@ -486,14 +377,14 @@ static int umdp_devio_region_request(umdp_connection* connection, uint64_t start
         return -NLE_NOMEM;
     }
 
-    int ret = nla_put_u64(msg, UMDP_ATTR_U64, start);
+    int ret = nla_put_u64(msg, UMDP_ATTR_DEVIO_REQUEST_START, start);
     if (ret != 0) {
         printf_err("failed to write start value: %s\n", nl_geterror(ret));
         nlmsg_free(msg);
         return ret;
     }
 
-    ret = nla_put_u32(msg, UMDP_ATTR_U32, size);
+    ret = nla_put_u64(msg, UMDP_ATTR_DEVIO_REQUEST_SIZE, size);
     if (ret != 0) {
         printf_err("failed to write size value: %s\n", nl_geterror(ret));
         nlmsg_free(msg);
@@ -516,11 +407,11 @@ static int umdp_devio_region_request(umdp_connection* connection, uint64_t start
     return 0;
 }
 
-int umdp_devio_request(umdp_connection* connection, uint64_t start, uint32_t size) {
+int umdp_devio_request(umdp_connection* connection, uint64_t start, uint64_t size) {
     return umdp_devio_region_request(connection, start, size, UMDP_CMD_DEVIO_REQUEST);
 }
 
-int umdp_devio_release(umdp_connection* connection, uint64_t start, uint32_t size) {
+int umdp_devio_release(umdp_connection* connection, uint64_t start, uint64_t size) {
     return umdp_devio_region_request(connection, start, size, UMDP_CMD_DEVIO_RELEASE);
 }
 
@@ -538,7 +429,7 @@ static int umdp_interrupt_subscription_request(umdp_connection* connection, uint
         return -NLE_NOMEM;
     }
 
-    int ret = nla_put_u32(msg, UMDP_ATTR_U32, irq);
+    int ret = nla_put_u32(msg, UMDP_ATTR_INTERRUPT_IRQ, irq);
     if (ret != 0) {
         printf_err("failed to write IRQ value: %s\n", nl_geterror(ret));
         nlmsg_free(msg);

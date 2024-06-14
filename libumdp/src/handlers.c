@@ -20,7 +20,7 @@ int umdp_echo_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,
     __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
     umdp_connection* connection = arg;
 
-    struct nlattr* msg_attr = find_attribute(info->attrs, UMDP_ATTR_MSG);
+    struct nlattr* msg_attr = find_attribute(info->attrs, UMDP_ATTR_ECHO_MSG);
     if (msg_attr == NULL) {
         print_err("received echo reply without a message attribute\n");
         return NL_SKIP;
@@ -42,7 +42,7 @@ int umdp_connect_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops
     __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
     umdp_connection* connection = arg;
 
-    struct nlattr* result_attr = find_attribute(info->attrs, UMDP_ATTR_U8);
+    struct nlattr* result_attr = find_attribute(info->attrs, UMDP_ATTR_CONNECT_REPLY);
     if (result_attr == NULL) {
         print_err("received connect reply without a result attribute\n");
         return NL_SKIP;
@@ -58,26 +58,26 @@ int umdp_devio_read_handler(__attribute__((unused)) struct nl_cache_ops* _cache_
     umdp_connection* connection = arg;
 
     bool found_attribute = false;
-    for (int i = 0; i < UMDP_ATTR_MAX + 1; i++) {
+    for (int i = 0; i < UMDP_ATTR_DEVIO_READ_MAX + 1; i++) {
         struct nlattr* attr = info->attrs[i];
         if (attr == NULL) {
             continue;
         }
 
         switch (nla_type(attr)) {
-            case UMDP_ATTR_U8: {
+            case UMDP_ATTR_DEVIO_READ_REPLY_U8: {
                 connection->received_devio_value.type = DEVIO_VALUE_U8;
                 connection->received_devio_value.u8 = *((uint8_t*) nla_data(attr));
                 found_attribute = true;
                 break;
             }
-            case UMDP_ATTR_U16: {
+            case UMDP_ATTR_DEVIO_READ_REPLY_U16: {
                 connection->received_devio_value.type = DEVIO_VALUE_U16;
                 connection->received_devio_value.u16 = *((uint16_t*) nla_data(attr));
                 found_attribute = true;
                 break;
             }
-            case UMDP_ATTR_U32: {
+            case UMDP_ATTR_DEVIO_READ_REPLY_U32: {
                 connection->received_devio_value.type = DEVIO_VALUE_U32;
                 connection->received_devio_value.u32 = *((uint32_t*) nla_data(attr));
                 found_attribute = true;
@@ -103,7 +103,7 @@ int umdp_interrupt_handler(__attribute__((unused)) struct nl_cache_ops* _unused,
     __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
     umdp_connection* connection = arg;
 
-    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_U32);
+    struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_INTERRUPT_IRQ);
     if (irq_attr == NULL) {
         print_err("received an interrupt notification without an IRQ attribute\n");
         return NL_SKIP;
