@@ -9,15 +9,9 @@
 #include "protocol.h"
 
 static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
-    for (int i = 0; i < UMDP_ATTR_MAX + 1; i++) {
-        struct nlattr* attribute = attributes[i];
-        if (attribute == NULL) {
-            continue;
-        }
-
-        if (nla_type(attribute) == type) {
-            return attribute;
-        }
+    struct nlattr* type_attr = attributes[type];
+    if (type_attr != NULL && nla_type(type_attr) == type) {
+        return type_attr;
     }
     return NULL;
 }

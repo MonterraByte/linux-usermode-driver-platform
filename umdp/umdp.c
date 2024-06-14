@@ -193,15 +193,9 @@ static struct genl_family umdp_genl_family = {
 };
 
 static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
-    int i;
-    for (i = 0; i < UMDP_ATTR_MAX + 1; i++) {
-        if (attributes[i] == NULL) {
-            continue;
-        }
-
-        if (nla_type(attributes[i]) == type) {
-            return attributes[i];
-        }
+    struct nlattr* type_attr = attributes[type];
+    if (type_attr != NULL && nla_type(type_attr) == type) {
+        return type_attr;
     }
     return NULL;
 }
