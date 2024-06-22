@@ -1,4 +1,6 @@
+#include <linux/cdev.h>
 #include <linux/fdtable.h>
+#include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
@@ -901,9 +903,65 @@ static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* inf
     return 0;
 }
 
+static int umdp_mem_open(struct inode* inode __attribute__((unused)), struct file* filep __attribute__((unused))) {
+    return 0;
+}
+
+static int umdp_mem_release(struct inode* inode __attribute__((unused)), struct file* filep __attribute__((unused))) {
+    return 0;
+}
+
+static struct file_operations umdp_mem_fops = {
+    .owner = THIS_MODULE,
+    .open = umdp_mem_open,
+    .release = umdp_mem_release,
+};
+
+static struct cdev umdp_mem_cdev;
+static dev_t umdp_mem_chrdev;
+static struct class* umdp_mem_dev_class;
+
+#define UDMP_MEM_CLASS_NAME "umdp"
+#define UDMP_MEM_DEVICE_NAME "umdp-mem"
+
 static int umdp_init(void) {
     devio_data.allocated_region_count = 0;
     ih_data.registered_irq_count = 0;
+
+    int ret = alloc_chrdev_region(&umdp_mem_chrdev, 0, 1, UDMP_MEM_DEVICE_NAME);
+    if (ret != 0) {
+        printk(KERN_ERR "umdp: Failed to allocate character device (error code %d)\n", -ret);
+        goto fail;
+    }
+
+    cdev_init(&umdp_mem_cdev, &umdp_mem_fops);
+    umdp_mem_cdev.owner = THIS_MODULE;
+    ret = kobject_set_name(&umdp_mem_cdev.kobj, UDMP_MEM_DEVICE_NAME);
+    if (ret != 0) {
+        printk(KERN_ERR "umdp: Failed to set character device name (error code %d)\n", -ret);
+        goto fail_after_cdev_init;
+    }
+
+    ret = cdev_add(&umdp_mem_cdev, umdp_mem_chrdev, 1);
+    if (ret != 0) {
+        printk(KERN_ERR "umdp: Failed to add character device to system (error code %d)\n", -ret);
+        goto fail_after_cdev_init;
+    }
+
+    umdp_mem_dev_class = class_create(UDMP_MEM_CLASS_NAME);
+    if (IS_ERR(umdp_mem_dev_class)) {
+        ret = (int) PTR_ERR(umdp_mem_dev_class);
+        printk(KERN_ERR "umdp: Failed to create character device class (error code %d)\n", -ret);
+        goto fail_after_cdev_init;
+    }
+
+    struct device* umdp_mem_device =
+        device_create(umdp_mem_dev_class, NULL, umdp_mem_chrdev, NULL, UDMP_MEM_DEVICE_NAME);
+    if (IS_ERR(umdp_mem_device)) {
+        ret = (int) PTR_ERR(umdp_mem_device);
+        printk(KERN_ERR "umdp: Failed to create character device (error code %d)\n", -ret);
+        goto fail_after_class_create;
+    }
 
     ih_workqueue = alloc_workqueue(UMDP_WORKQUEUE_NAME, 0, 0);
     size_t i;
@@ -911,14 +969,24 @@ static int umdp_init(void) {
         ih_workers[i].busy = false;
     }
 
-    int ret = genl_register_family(&umdp_genl_family);
+    ret = genl_register_family(&umdp_genl_family);
     if (ret != 0) {
         printk(KERN_ERR "umdp: Failed to register netlink family (error code %d)\n", ret);
-        return ret;
+        goto fail_after_device_create;
     }
 
     printk(KERN_INFO "umdp: Registered netlink kernel family (id: %d)\n", umdp_genl_family.id);
     return 0;
+
+fail_after_device_create:
+    device_destroy(umdp_mem_dev_class, umdp_mem_chrdev);
+fail_after_class_create:
+    class_destroy(umdp_mem_dev_class);
+fail_after_cdev_init:
+    cdev_del(&umdp_mem_cdev);
+    unregister_chrdev_region(umdp_mem_chrdev, 1);
+fail:
+    return ret;
 }
 
 static void umdp_exit(void) {
@@ -947,6 +1015,11 @@ static void umdp_exit(void) {
     }
 
     mutex_unlock(&devio_data_mutex);
+
+    device_destroy(umdp_mem_dev_class, umdp_mem_chrdev);
+    class_destroy(umdp_mem_dev_class);
+    cdev_del(&umdp_mem_cdev);
+    unregister_chrdev_region(umdp_mem_chrdev, 1);
 
     down_write(&client_info_lock);
     struct client_info* p;
