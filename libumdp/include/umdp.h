@@ -147,6 +147,15 @@ UMDP_PUBLIC int umdp_interrupt_unsubscribe(umdp_connection* connection, uint32_t
 /// \return 0 in case of success, a non-zero value in case of failure
 UMDP_PUBLIC int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out);
 
+
+/// Get description of error number.
+///
+/// The returned pointer should not be `free()`'d by the caller.
+///
+/// This function can use `strerror()` internally, so the returned pointer could be invalidated
+/// by a subsequent call to this function, or to `strerror()` or related functions. As such,
+/// if the caller needs to use the string after the immediate moment when this function is called,
+/// it should make a copy of the returned string.
 UMDP_PUBLIC const char* umdp_strerror(int error);
 
 #ifdef __cplusplus
