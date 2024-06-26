@@ -1,6 +1,9 @@
 #include "connection.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <netlink/socket.h>
@@ -44,12 +47,16 @@ void umdp_connection_init(umdp_connection* connection) {
     connection->received_echo = NULL;
     connection->received_devio_value.type = DEVIO_VALUE_NONE;
     irq_queue_init(&connection->irq_queue);
+    connection->mem_fd = -1;
 }
 
 void umdp_connection_destroy(umdp_connection* connection) {
     nl_socket_free(connection->socket);
     free(connection->subscribed_irqs);
     free(connection->received_echo);
+    if (connection->mem_fd >= 0) {
+        close(connection->mem_fd);
+    }
 }
 
 void umdp_connection_add_irq(umdp_connection* connection, uint32_t irq) {
@@ -96,4 +103,19 @@ bool is_subscribed_to_irq(umdp_connection* connection, uint32_t irq) {
         }
     }
     return false;
+}
+
+int umdp_open_mem_if_unopened(umdp_connection* connection) {
+    if (connection->mem_fd >= 0) {
+        return 0;
+    }
+
+    connection->mem_fd = open("/dev/umdp-mem", O_RDWR);
+    if (connection->mem_fd < 0) {
+        int ret = errno;
+        printf_err("failed to open /dev/umdp-mem: %s\n", strerror(ret));
+        return ret;
+    }
+
+    return 0;
 }

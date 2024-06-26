@@ -5,6 +5,7 @@
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
 #include <linux/list.h>
+#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/pid.h>
@@ -911,10 +912,28 @@ static int umdp_mem_release(struct inode* inode __attribute__((unused)), struct 
     return 0;
 }
 
+static int umdp_mem_mmap(struct file* file __attribute__((unused)), struct vm_area_struct* vma) {
+    bool is_write = (vma->vm_flags & VM_WRITE) != 0;
+    vm_flags_t shared_flags =
+        VM_MAYSHARE | (is_write ? VM_SHARED : 0);  // is VM_MAYSHARE always set if VM_SHARED is set?
+    if ((vma->vm_flags & shared_flags) != shared_flags) {
+        printk(KERN_ERR "umdp: mmap requests must set the MAP_SHARED flag\n");
+        return -EINVAL;
+    }
+
+    vma->__vm_flags |= VM_IO;
+
+    printk(KERN_DEBUG "umdp: performing mmap of region 0x%lx-0x%lx to address 0x%lu of PID %d\n",
+        vma->vm_pgoff * PAGE_SIZE, vma->vm_pgoff * PAGE_SIZE + (vma->vm_end - vma->vm_start), vma->vm_start,
+        current->pid);
+    return io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff, vma->vm_end - vma->vm_start, vma->vm_page_prot);
+}
+
 static struct file_operations umdp_mem_fops = {
     .owner = THIS_MODULE,
     .open = umdp_mem_open,
     .release = umdp_mem_release,
+    .mmap = umdp_mem_mmap,
 };
 
 static struct cdev umdp_mem_cdev;

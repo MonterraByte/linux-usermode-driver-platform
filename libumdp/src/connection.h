@@ -53,6 +53,8 @@ struct umdp_connection {
     char* received_echo;
     devio_value received_devio_value;
     irq_queue irq_queue;
+
+    int mem_fd;
 };
 
 void umdp_connection_init(umdp_connection* connection);
@@ -60,5 +62,6 @@ void umdp_connection_destroy(umdp_connection* connection);
 void umdp_connection_add_irq(umdp_connection* connection, uint32_t irq);
 void umdp_connection_remove_irq(umdp_connection* connection, uint32_t irq);
 bool is_subscribed_to_irq(umdp_connection* connection, uint32_t irq);
+int umdp_open_mem_if_unopened(umdp_connection* connection);
 
 #endif  // UMDP_CONNECTION_H

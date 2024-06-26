@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #include <netlink/genl/ctrl.h>
 #include <netlink/genl/genl.h>
@@ -478,6 +479,34 @@ int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out) {
             return ret;
         }
     }
+    return 0;
+}
+
+int umdp_mmap_physical(umdp_connection* connection, off_t start, size_t size, void** out) {
+    if (out == NULL) {
+        print_err("out parameter is NULL\n");
+        return EINVAL;
+    }
+    *out = NULL;
+
+    if (size == 0) {
+        print_err("size parameter is 0\n");
+        return EINVAL;
+    }
+
+    int ret = umdp_open_mem_if_unopened(connection);
+    if (ret != 0) {
+        return ret;
+    }
+
+    void* result = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, connection->mem_fd, start);
+    if (result == MAP_FAILED) {
+        ret = errno;
+        printf_err("mmap failed: %s\n", strerror(ret));
+        return ret;
+    }
+
+    *out = result;
     return 0;
 }
 

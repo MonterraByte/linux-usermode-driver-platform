@@ -23,6 +23,7 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include <sys/types.h>
 
 typedef struct umdp_connection umdp_connection;
 
@@ -146,6 +147,16 @@ UMDP_PUBLIC int umdp_interrupt_unsubscribe(umdp_connection* connection, uint32_t
 /// \param out Pointer to where the IRQ number should be stored
 /// \return 0 in case of success, a non-zero value in case of failure
 UMDP_PUBLIC int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out);
+
+
+/// Establish a mapping between a physical memory region and the process's address space.
+///
+/// \param connection `umdp_connection` to use
+/// \param start Address of the start of the physical memory region to map
+/// \param size Size of the region to be mapped
+/// \param out Pointer to location to store the address of the mapped region in (will be set to a valid pointer on success, or NULL in case of failure)
+/// \return 0 in case of success, a non-zero value in case of failure
+UMDP_PUBLIC int umdp_mmap_physical(umdp_connection* connection, off_t start, size_t size, void** out);
 
 
 /// Get description of error number.
