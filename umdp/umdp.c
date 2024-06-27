@@ -41,6 +41,7 @@ enum {
     UMDP_CMD_INTERRUPT_NOTIFICATION = 7,
     UMDP_CMD_INTERRUPT_SUBSCRIBE = 8,
     UMDP_CMD_INTERRUPT_UNSUBSCRIBE = 9,
+    UMDP_CMD_MMAP_PHYSICAL = 10,
     __UMDP_CMD_MAX,
 };
 #define UMDP_CMD_MAX (__UMDP_CMD_MAX - 1)
@@ -191,6 +192,27 @@ static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_INTERRUPT_MAX + 1]
         },
 };
 
+// mmap attributes
+enum {
+    UMDP_ATTR_MMAP_UNSPEC __attribute__((unused)) = 0,
+    UMDP_ATTR_MMAP_START = 1,
+    UMDP_ATTR_MMAP_LENGTH = 2,
+    __UMDP_ATTR_MMAP_MAX,
+};
+#define UMDP_ATTR_MMAP_MAX (__UMDP_ATTR_MMAP_MAX - 1)
+static_assert(UMDP_ATTR_MMAP_MAX <= UMDP_ATTR_MAX);
+
+static struct nla_policy umdp_genl_mmap_policy[UMDP_ATTR_MMAP_MAX + 1] = {
+    [UMDP_ATTR_MMAP_START] =
+        {
+            .type = NLA_U64,
+        },
+    [UMDP_ATTR_MMAP_LENGTH] =
+        {
+            .type = NLA_U64,
+        },
+};
+
 static int umdp_echo(struct sk_buff* skb, struct genl_info* info);
 static int umdp_connect(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info);
@@ -200,6 +222,7 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info);
 static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info);
 static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* info);
 static int umdp_interrupt_notification(struct sk_buff* skb, struct genl_info* info) { return 0; }
+static int umdp_mmap_physical(struct sk_buff* skb, struct genl_info* info);
 
 /* operation definition */
 static const struct genl_ops umdp_genl_ops[] = {
@@ -273,6 +296,14 @@ static const struct genl_ops umdp_genl_ops[] = {
         .maxattr = UMDP_ATTR_INTERRUPT_MAX,
         .policy = umdp_genl_interrupt_policy,
         .doit = umdp_interrupt_unsubscribe,
+        .dumpit = NULL,
+    },
+    {
+        .cmd = UMDP_CMD_MMAP_PHYSICAL,
+        .flags = 0,
+        .maxattr = UMDP_ATTR_MMAP_MAX,
+        .policy = umdp_genl_mmap_policy,
+        .doit = umdp_mmap_physical,
         .dumpit = NULL,
     },
 };
@@ -901,6 +932,25 @@ static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* inf
     free_irq(irq, &ih_data);
     mutex_unlock(&ih_data_mutex);
     printk(KERN_INFO "umdp: unsubscribed from IRQ %u\n", irq);
+    return 0;
+}
+
+static int umdp_mmap_physical(struct sk_buff* skb, struct genl_info* info) {
+    struct nlattr* start_attr = find_attribute(info->attrs, UMDP_ATTR_MMAP_START);
+    if (start_attr == NULL) {
+        printk(KERN_ERR "umdp: invalid mmap request: start attribute is missing\n");
+        return -EINVAL;
+    }
+    u64 start = *((u64*) nla_data(start_attr));
+
+    struct nlattr* length_attr = find_attribute(info->attrs, UMDP_ATTR_MMAP_START);
+    if (length_attr == NULL) {
+        printk(KERN_ERR "umdp: invalid mmap request: start attribute is missing\n");
+        return -EINVAL;
+    }
+    u64 length = *((u64*) nla_data(length_attr));
+
+    //vm_iomap_memory();
     return 0;
 }
 

@@ -482,6 +482,57 @@ int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out) {
     return 0;
 }
 
+int umdp_mmap_physical_(umdp_connection* connection, uint64_t start, uint64_t size) {
+    if (size == 0) {
+        print_err("size cannot be 0\n");
+        return EINVAL;
+    }
+
+    struct nl_msg* msg =
+        nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(start)) + nla_total_size(sizeof(size)));
+    if (msg == NULL) {
+        print_err("failed to allocate memory\n");
+        return ENOMEM;
+    }
+
+    if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, UMDP_CMD_MMAP_PHYSICAL,
+            UMDP_GENL_VERSION)
+        == NULL) {
+        print_err("failed to write netlink headers\n");
+        nlmsg_free(msg);
+        return -NLE_NOMEM;
+    }
+
+    int ret = nla_put_u64(msg, UMDP_ATTR_MMAP_START, start);
+    if (ret != 0) {
+        printf_err("failed to write start value: %s\n", nl_geterror(ret));
+        nlmsg_free(msg);
+        return ret;
+    }
+
+    ret = nla_put_u64(msg, UMDP_ATTR_MMAP_LENGTH, size);
+    if (ret != 0) {
+        printf_err("failed to write size value: %s\n", nl_geterror(ret));
+        nlmsg_free(msg);
+        return ret;
+    }
+
+    ret = nl_send_auto(connection->socket, msg);
+    nlmsg_free(msg);
+    if (ret < 0) {
+        printf_err("failed to send mmap request: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    ret = nl_wait_for_ack(connection->socket);
+    if (ret != 0) {
+        printf_err("failed to receive ACK: %s\n", nl_geterror(ret));
+        return ret;
+    }
+
+    return 0;
+}
+
 int umdp_mmap_physical(umdp_connection* connection, off_t start, size_t size, void** out) {
     if (out == NULL) {
         print_err("out parameter is NULL\n");

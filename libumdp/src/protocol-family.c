@@ -84,6 +84,17 @@ static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_INTERRUPT_MAX + 1]
         },
 };
 
+static struct nla_policy umdp_genl_mmap_policy[UMDP_ATTR_MMAP_MAX + 1] = {
+    [UMDP_ATTR_MMAP_START] =
+        {
+            .type = NLA_U64,
+        },
+    [UMDP_ATTR_MMAP_LENGTH] =
+        {
+            .type = NLA_U64,
+        },
+};
+
 static struct genl_cmd umdp_cmds[] = {
     {
         .c_id = UMDP_CMD_ECHO,
@@ -142,6 +153,12 @@ static struct genl_cmd umdp_cmds[] = {
         .c_name = "UMDP_CMD_INTERRUPT_UNSUBSCRIBE",
         .c_maxattr = UMDP_ATTR_INTERRUPT_MAX,
         .c_attr_policy = umdp_genl_interrupt_policy,
+    },
+    {
+        .c_id = UMDP_CMD_MMAP_PHYSICAL,
+        .c_name = "UMDP_CMD_MMAP_PHYSICAL",
+        .c_maxattr = UMDP_ATTR_MMAP_MAX,
+        .c_attr_policy = umdp_genl_mmap_policy,
     },
 };
 
