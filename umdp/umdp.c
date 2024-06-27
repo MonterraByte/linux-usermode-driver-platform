@@ -354,6 +354,16 @@ static DECLARE_RWSEM(client_info_lock);
 #define for_each_client_info(p) list_for_each_entry(p, &client_info_list, list)
 #define for_each_client_info_safe(p, next) list_for_each_entry_safe(p, next, &client_info_list, list)
 
+static struct client_info* get_client_info_by_pid(struct pid* pid) {
+    struct client_info* client_info;
+    for_each_client_info(client_info) {
+        if (client_info->pid == pid) {
+            return client_info;
+        }
+    }
+    return NULL;
+}
+
 // client_info_list write lock must be acquired when calling this
 static bool register_client(u32 port_id, struct pid* pid) {
     struct client_info* client_info = kmalloc(sizeof(struct client_info), GFP_KERNEL);
@@ -922,6 +932,14 @@ static int umdp_mem_mmap(struct file* file __attribute__((unused)), struct vm_ar
     }
 
     vma->__vm_flags |= VM_IO;
+
+    struct pid* pid = get_task_pid(current, PIDTYPE_PID);
+    struct client_info* client_info = get_client_info_by_pid(pid);
+    put_pid(pid);
+
+    if (client_info == NULL) {
+        return -EPERM;
+    }
 
     printk(KERN_DEBUG "umdp: performing mmap of region 0x%lx-0x%lx to address 0x%lu of PID %d\n",
         vma->vm_pgoff * PAGE_SIZE, vma->vm_pgoff * PAGE_SIZE + (vma->vm_end - vma->vm_start), vma->vm_start,
