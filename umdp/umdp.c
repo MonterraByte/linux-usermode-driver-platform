@@ -852,7 +852,12 @@ static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info)
     }
 
     // TODO: allow the user to decide if they want IRQF_SHARED
-    int ret = request_irq(irq, interrupt_handler, IRQF_SHARED, UMDP_DEVICE_NAME, &ih_data);
+    unsigned long flags = IRQF_SHARED;
+    if (irq == 0) {
+        flags |= IRQF_NOBALANCING | IRQF_IRQPOLL | IRQF_TIMER;
+    }
+
+    int ret = request_irq(irq, interrupt_handler, flags, UMDP_DEVICE_NAME, &ih_data);
     if (ret != 0) {
         mutex_unlock(&ih_data_mutex);
         printk(KERN_ERR "umdp: IRQ request failed with code %d\n", ret);
