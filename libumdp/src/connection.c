@@ -44,7 +44,6 @@ void umdp_connection_init(umdp_connection* connection) {
     connection->connect_command_result = CONNECT_RESULT_NONE;
     connection->subscribed_irqs = NULL;
     connection->subscribed_irq_count = 0;
-    connection->received_echo = NULL;
     connection->received_devio_value.type = DEVIO_VALUE_NONE;
     irq_queue_init(&connection->irq_queue);
     connection->mem_fd = -1;
@@ -53,7 +52,6 @@ void umdp_connection_init(umdp_connection* connection) {
 void umdp_connection_destroy(umdp_connection* connection) {
     nl_socket_free(connection->socket);
     free(connection->subscribed_irqs);
-    free(connection->received_echo);
     if (connection->mem_fd >= 0) {
         close(connection->mem_fd);
     }

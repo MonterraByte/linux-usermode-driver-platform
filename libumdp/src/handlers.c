@@ -1,8 +1,6 @@
 #include "handlers.h"
 
 #include <stdbool.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "connection.h"
 #include "error.h"
@@ -14,28 +12,6 @@ static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
         return type_attr;
     }
     return NULL;
-}
-
-int umdp_echo_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,
-    __attribute__((unused)) struct genl_cmd* _cmd, struct genl_info* info, void* arg) {
-    umdp_connection* connection = arg;
-
-    struct nlattr* msg_attr = find_attribute(info->attrs, UMDP_ATTR_ECHO_MSG);
-    if (msg_attr == NULL) {
-        print_err("received echo reply without a message attribute\n");
-        return NL_SKIP;
-    }
-
-    size_t message_length = nla_len(msg_attr);
-    free(connection->received_echo);
-    connection->received_echo = malloc(message_length);
-    if (connection->received_echo == NULL) {
-        print_err("failed to allocate memory\n");
-        return NL_STOP;
-    }
-
-    memcpy(connection->received_echo, nla_data(msg_attr), message_length);
-    return NL_SKIP;
 }
 
 int umdp_connect_handler(__attribute__((unused)) struct nl_cache_ops* _cache_ops,

@@ -32,15 +32,14 @@ MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
 /* commands */
 enum {
     UMDP_CMD_UNSPEC __attribute__((unused)) = 0,
-    UMDP_CMD_ECHO = 1,
-    UMDP_CMD_CONNECT = 2,
-    UMDP_CMD_DEVIO_READ = 3,
-    UMDP_CMD_DEVIO_WRITE = 4,
-    UMDP_CMD_DEVIO_REQUEST = 5,
-    UMDP_CMD_DEVIO_RELEASE = 6,
-    UMDP_CMD_INTERRUPT_NOTIFICATION = 7,
-    UMDP_CMD_INTERRUPT_SUBSCRIBE = 8,
-    UMDP_CMD_INTERRUPT_UNSUBSCRIBE = 9,
+    UMDP_CMD_CONNECT = 1,
+    UMDP_CMD_DEVIO_READ = 2,
+    UMDP_CMD_DEVIO_WRITE = 3,
+    UMDP_CMD_DEVIO_REQUEST = 4,
+    UMDP_CMD_DEVIO_RELEASE = 5,
+    UMDP_CMD_INTERRUPT_NOTIFICATION = 6,
+    UMDP_CMD_INTERRUPT_SUBSCRIBE = 7,
+    UMDP_CMD_INTERRUPT_UNSUBSCRIBE = 8,
     __UMDP_CMD_MAX,
 };
 #define UMDP_CMD_MAX (__UMDP_CMD_MAX - 1)
@@ -48,22 +47,6 @@ enum {
 // Should be updated as needed when attributes are added/removed.
 // The `static_assert`s make sure the value it at least correct.
 #define UMDP_ATTR_MAX 5
-
-// echo attributes
-enum {
-    UMDP_ATTR_ECHO_UNSPEC __attribute__((unused)) = 0,
-    UMDP_ATTR_ECHO_MSG = 1,
-    __UMDP_ATTR_ECHO_MAX,
-};
-#define UMDP_ATTR_ECHO_MAX (__UMDP_ATTR_ECHO_MAX - 1)
-static_assert(UMDP_ATTR_ECHO_MAX <= UMDP_ATTR_MAX);
-
-static struct nla_policy umdp_genl_echo_policy[UMDP_ATTR_ECHO_MAX + 1] = {
-    [UMDP_ATTR_ECHO_MSG] =
-        {
-            .type = NLA_NUL_STRING,
-        },
-};
 
 // connect attributes
 enum {
@@ -191,7 +174,6 @@ static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_INTERRUPT_MAX + 1]
         },
 };
 
-static int umdp_echo(struct sk_buff* skb, struct genl_info* info);
 static int umdp_connect(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info);
 static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info);
@@ -203,14 +185,6 @@ static int umdp_interrupt_notification(struct sk_buff* skb, struct genl_info* in
 
 /* operation definition */
 static const struct genl_ops umdp_genl_ops[] = {
-    {
-        .cmd = UMDP_CMD_ECHO,
-        .flags = 0,
-        .maxattr = UMDP_ATTR_ECHO_MAX,
-        .policy = umdp_genl_echo_policy,
-        .doit = umdp_echo,
-        .dumpit = NULL,
-    },
     {
         .cmd = UMDP_CMD_CONNECT,
         .flags = 0,
@@ -301,47 +275,6 @@ static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
         return type_attr;
     }
     return NULL;
-}
-
-/* UMDP_CMD_ECHO handler */
-static int umdp_echo(struct sk_buff* skb, struct genl_info* info) {
-    printk(KERN_DEBUG "umdp: received echo request\n");
-
-    struct nlattr* msg_attr = find_attribute(info->attrs, UMDP_ATTR_ECHO_MSG);
-    if (msg_attr == NULL) {
-        printk(KERN_ERR "umdp: did not find message attribute in echo request\n");
-        return -EINVAL;
-    }
-
-    struct sk_buff* reply = genlmsg_new(nla_total_size(nla_len(msg_attr)), GFP_KERNEL);
-    if (reply == NULL) {
-        printk(KERN_ERR "umdp: failed to allocate buffer for echo reply\n");
-        return -ENOMEM;
-    }
-
-    void* reply_header = genlmsg_put_reply(reply, info, &umdp_genl_family, 0, UMDP_CMD_ECHO);
-    if (reply_header == NULL) {
-        nlmsg_free(reply);
-        printk(KERN_ERR "umdp: failed to add the generic netlink header to the echo reply\n");
-        return -EMSGSIZE;
-    }
-
-    int ret = nla_put_string(reply, UMDP_ATTR_ECHO_MSG, nla_data(msg_attr));
-    if (ret != 0) {
-        nlmsg_free(reply);
-        printk(KERN_ERR "umdp: failed to write string to the echo reply\n");
-        return ret;
-    }
-
-    genlmsg_end(reply, reply_header);
-    ret = genlmsg_reply(reply, info);
-    if (ret != 0) {
-        printk(KERN_ERR "umdp: failed to send echo reply\n");
-        return ret;
-    }
-
-    printk(KERN_DEBUG "umdp: sent echo reply\n");
-    return 0;
 }
 
 struct client_info {

@@ -5,13 +5,6 @@
 #include "handlers.h"
 #include "protocol.h"
 
-static struct nla_policy umdp_genl_echo_policy[UMDP_ATTR_ECHO_MAX + 1] = {
-    [UMDP_ATTR_ECHO_MSG] =
-        {
-            .type = NLA_NUL_STRING,
-        },
-};
-
 static struct nla_policy umdp_genl_connect_policy[UMDP_ATTR_CONNECT_MAX + 1] = {
     [UMDP_ATTR_CONNECT_PID] =
         {
@@ -85,13 +78,6 @@ static struct nla_policy umdp_genl_interrupt_policy[UMDP_ATTR_INTERRUPT_MAX + 1]
 };
 
 static struct genl_cmd umdp_cmds[] = {
-    {
-        .c_id = UMDP_CMD_ECHO,
-        .c_name = "UMDP_CMD_ECHO",
-        .c_maxattr = UMDP_ATTR_ECHO_MAX,
-        .c_attr_policy = umdp_genl_echo_policy,
-        .c_msg_parser = umdp_echo_handler,
-    },
     {
         .c_id = UMDP_CMD_CONNECT,
         .c_name = "UMDP_CMD_CONNECT",

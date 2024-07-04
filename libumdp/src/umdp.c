@@ -139,57 +139,6 @@ void umdp_disconnect(umdp_connection* connection) {
     free(connection);
 }
 
-char* umdp_echo(umdp_connection* connection, char* string) {
-    size_t string_length = strlen(string) + 1;
-
-    struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size((int) string_length));
-    if (msg == NULL) {
-        print_err("failed to allocate memory\n");
-        return NULL;
-    }
-
-    if (genlmsg_put(
-            msg, NL_AUTO_PORT, NL_AUTO_SEQ, umdp_family.o_id, 0, NLM_F_REQUEST, UMDP_CMD_ECHO, UMDP_GENL_VERSION)
-        == NULL) {
-        print_err("failed to write netlink headers\n");
-        goto msg_failure;
-    }
-
-    int ret = nla_put_string(msg, UMDP_ATTR_ECHO_MSG, string);
-    if (ret != 0) {
-        printf_err("failed to write string: %s\n", nl_geterror(ret));
-        goto msg_failure;
-    }
-
-    ret = nl_send_auto(connection->socket, msg);
-    if (ret < 0) {
-        printf_err("failed to send message: %s\n", nl_geterror(ret));
-        goto msg_failure;
-    }
-    nlmsg_free(msg);
-
-    do {
-        ret = nl_recvmsgs_default(connection->socket);
-        if (ret != 0) {
-            printf_err("failed to receive reply: %s\n", nl_geterror(ret));
-            return NULL;
-        }
-    } while (connection->received_echo == NULL);
-
-    size_t length = strlen(connection->received_echo) + 1;
-    char* copy = malloc(length);
-    if (copy == NULL) {
-        print_err("failed to allocate memory\n");
-        return NULL;
-    }
-    strncpy(copy, connection->received_echo, length);
-    return copy;
-
-msg_failure:
-    nlmsg_free(msg);
-    return NULL;
-}
-
 static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t type, void* out) {
     connection->received_devio_value.type = DEVIO_VALUE_NONE;
 

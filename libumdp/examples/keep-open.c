@@ -15,14 +15,6 @@ int main(void) {
         return 1;
     }
 
-    char* reply = umdp_echo(connection, "message");
-    if (reply == NULL) {
-        fprintf(stderr, "umdp_echo returned NULL\n");
-        umdp_disconnect(connection);
-        return 1;
-    }
-    free(reply);
-
     printf("Connection established. Press Enter to close the connection.");
 
     char* lineptr = NULL;

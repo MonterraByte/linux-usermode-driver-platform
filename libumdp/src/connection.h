@@ -50,7 +50,6 @@ struct umdp_connection {
     uint32_t* subscribed_irqs;
     size_t subscribed_irq_count;
 
-    char* received_echo;
     devio_value received_devio_value;
     irq_queue irq_queue;
 
