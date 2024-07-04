@@ -363,7 +363,7 @@ static int umdp_connect(struct sk_buff* skb, struct genl_info* info) {
 
     struct nlattr* pid_attr = find_attribute(info->attrs, UMDP_ATTR_CONNECT_PID);
     if (pid_attr == NULL) {
-        printk(KERN_ERR "umdp: did not find PID attribute in echo request\n");
+        printk(KERN_ERR "umdp: did not find PID attribute in connect request\n");
         return -EINVAL;
     }
     s32 pid_number = *(s32*) nla_data(pid_attr);
