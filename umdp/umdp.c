@@ -4,6 +4,7 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
+#include <linux/kprobes.h>
 #include <linux/list.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -316,6 +317,41 @@ static bool register_client_if_not_registered(u32 port_id, struct pid* pid) {
 
     return register_client(port_id, pid);
 }
+
+// client_info_list write lock must be acquired when calling this
+static void remove_client(struct pid* pid) {
+    struct client_info* p;
+    struct client_info* next;
+    for_each_client_info_safe(p, next) {
+        if (p->pid == pid) {
+            printk(KERN_INFO "umdp: removed client with port ID %u\n", p->port_id);
+            list_del(&p->list);
+            put_pid(p->pid);
+            kfree(p);
+        }
+    }
+}
+NOKPROBE_SYMBOL(remove_client);
+
+// This gets executed at the start of the `do_exit` kernel function, or, in other words, when a process exits.
+// We can look at its PID to figure out if it is one of our clients, and if so, we remove it and free its resources.
+static int do_exit_handler(struct kprobe* p __attribute__((unused)), struct pt_regs* regs __attribute__((unused))) {
+    struct pid* pid = get_task_pid(current, PIDTYPE_PID);
+
+    down_write(&client_info_lock);
+    remove_client(pid);
+    up_write(&client_info_lock);
+
+    put_pid(pid);
+    return 0;
+}
+NOKPROBE_SYMBOL(do_exit_handler);
+
+static struct kprobe do_exit_kp = {
+    .symbol_name = "do_exit",
+    .pre_handler = do_exit_handler,
+    .post_handler = NULL,
+};
 
 // `struct netlink_sock` is defined in `net/netlink/af_netlink.h` in the kernel source code, which isn't part of the "public" headers.
 // However, we need to access the portid.
@@ -876,6 +912,8 @@ static struct class* umdp_mem_dev_class;
 #define UDMP_MEM_CLASS_NAME "umdp"
 #define UDMP_MEM_DEVICE_NAME "umdp-mem"
 
+static bool kprobe_registered = false;
+
 static int umdp_init(void) {
     devio_data.allocated_region_count = 0;
     ih_data.registered_irq_count = 0;
@@ -921,16 +959,32 @@ static int umdp_init(void) {
         ih_workers[i].busy = false;
     }
 
+    ret = register_kprobe(&do_exit_kp);
+    if (ret == -EOPNOTSUPP) {
+        printk(KERN_WARNING
+            "umdp: This kernel does not support kprobes (it was built with CONFIG_KPROBES=n), resources won't be freed "
+            "on process exit\n");
+    } else if (ret < 0) {
+        printk(KERN_WARNING
+            "umdp: Failed to register kprobe (error code %d), resources won't be freed on process exit\n",
+            -ret);
+    } else {
+        kprobe_registered = true;
+    }
+
     ret = genl_register_family(&umdp_genl_family);
     if (ret != 0) {
         printk(KERN_ERR "umdp: Failed to register netlink family (error code %d)\n", ret);
-        goto fail_after_device_create;
+        goto fail_after_kprobe_register;
     }
 
     printk(KERN_INFO "umdp: Registered netlink kernel family (id: %d)\n", umdp_genl_family.id);
     return 0;
 
-fail_after_device_create:
+fail_after_kprobe_register:
+    if (kprobe_registered) {
+        unregister_kprobe(&do_exit_kp);
+    }
     device_destroy(umdp_mem_dev_class, umdp_mem_chrdev);
 fail_after_class_create:
     class_destroy(umdp_mem_dev_class);
@@ -947,6 +1001,10 @@ static void umdp_exit(void) {
         printk(KERN_ERR "umdp: Failed to unregister netlink family\n");
     } else {
         printk(KERN_INFO "umdp: Unregistered netlink family\n");
+    }
+
+    if (kprobe_registered) {
+        unregister_kprobe(&do_exit_kp);
     }
 
     destroy_workqueue(ih_workqueue);
