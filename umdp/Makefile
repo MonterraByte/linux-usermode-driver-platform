@@ -1,6 +1,7 @@
 ifneq ($(KERNELRELEASE),)
 # kbuild part of makefile
 obj-m  := umdp.o
+umdp-y := umdp_core.o
 
 else
 # normal makefile
