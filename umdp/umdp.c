@@ -309,7 +309,7 @@ static bool register_client_if_not_registered(u32 port_id, struct pid* pid) {
     for_each_client_info(p) {
         if (p->port_id == port_id) {
             // already registered
-            printk(KERN_ERR "umdp: port ID %d was already registered, it cannot be registered again\n", port_id);
+            printk(KERN_ERR "umdp: port ID %u was already registered, it cannot be registered again\n", port_id);
             return false;
         }
     }
