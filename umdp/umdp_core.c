@@ -1,4 +1,5 @@
 #include <linux/cdev.h>
+#include <linux/dcache.h>
 #include <linux/fdtable.h>
 #include <linux/fs.h>
 #include <linux/init.h>
@@ -7,6 +8,7 @@
 #include <linux/kprobes.h>
 #include <linux/list.h>
 #include <linux/mm.h>
+#include <linux/mm_types.h>
 #include <linux/module.h>
 #include <linux/pid.h>
 #include <linux/rwsem.h>
@@ -278,10 +280,72 @@ static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
     return NULL;
 }
 
+/// Returns the path to the executable of a task, if it has one.
+///
+/// Returns `NULL` on failure.
+/// The returned string must be freed by the caller using `kfree()`.
+static char* exe_path_of_task(struct task_struct* task) {
+    char* exe_path = NULL;
+
+    struct mm_struct* mm = get_task_mm(task);
+    if (mm == NULL) {
+        return NULL;
+    }
+
+    rcu_read_lock();
+    struct file* exe_file = get_file_rcu(&mm->exe_file);
+    rcu_read_unlock();
+
+    if (exe_file == NULL) {
+        goto fail_after_mm;
+    }
+
+    char* buf = kmalloc(PATH_MAX, GFP_KERNEL);
+    if (buf == NULL) {
+        goto fail_after_file;
+    }
+
+    char* file_path_buf = d_path(&exe_file->f_path, buf, PATH_MAX);
+    if (IS_ERR(file_path_buf)) {
+        printk(KERN_ERR "umdp: d_path failed (error code %ld)\n", PTR_ERR(file_path_buf));
+    } else if (unlikely(file_path_buf == NULL)) {
+        printk(KERN_ERR "umdp: d_path returned NULL\n");
+    } else {
+        size_t file_path_len = strnlen(file_path_buf, PATH_MAX);
+        exe_path = kmalloc(file_path_len + 1, GFP_KERNEL);
+        if (exe_path == NULL) {
+            goto fail_after_buf;
+        }
+        memcpy(exe_path, file_path_buf, file_path_len);
+        exe_path[file_path_len] = '\0';
+    }
+
+fail_after_buf:
+    kfree(buf);
+fail_after_file:
+    fput(exe_file);
+fail_after_mm:
+    mmput(mm);
+    return exe_path;
+}
+
+static char* exe_path_of_pid(struct pid* pid) {
+    struct task_struct* task = get_pid_task(pid, PIDTYPE_PID);
+    if (task == NULL) {
+        return NULL;
+    }
+
+    char* result = exe_path_of_task(task);
+
+    put_task_struct(task);
+    return result;
+}
+
 struct client_info {
     struct list_head list;
     u32 port_id;
     struct pid* pid;
+    char* exe_path;
 
     u32* registered_irqs;
     size_t registered_irqs_count;
@@ -296,6 +360,12 @@ static DECLARE_RWSEM(client_info_lock);
 
 // client_info_list write lock must be acquired when calling this
 static bool register_client(u32 port_id, struct pid* pid) {
+    char* exe_path = exe_path_of_pid(pid);
+    if (exe_path == NULL) {
+        printk(KERN_ERR "umdp: failed to get executable path of PID %d (port ID %u)\n", pid_nr(pid), port_id);
+        return false;
+    }
+
     struct client_info* client_info = kmalloc(sizeof(struct client_info), GFP_KERNEL);
     if (client_info == NULL) {
         printk(KERN_ERR "umdp: failed to allocate memory for client info\n");
@@ -305,6 +375,7 @@ static bool register_client(u32 port_id, struct pid* pid) {
     INIT_LIST_HEAD(&client_info->list);
     client_info->port_id = port_id;
     client_info->pid = pid;
+    client_info->exe_path = exe_path;
     client_info->registered_irqs = NULL;
     client_info->registered_irqs_count = 0;
     client_info->requested_port_io_regions = NULL;
@@ -378,6 +449,7 @@ static void remove_client(struct client_info* p) {
     }
     kfree(p->requested_port_io_regions);
 
+    kfree(p->exe_path);
     put_pid(p->pid);
     kfree(p);
 }
