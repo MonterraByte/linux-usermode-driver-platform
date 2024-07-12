@@ -318,20 +318,29 @@ static bool register_client_if_not_registered(u32 port_id, struct pid* pid) {
     return register_client(port_id, pid);
 }
 
+/// Removes a `struct client_info` from the list it's contained in, and releases its resources
+///
+/// `client_info_list` write lock must be acquired when calling this.
+/// If iterating through `client_info_list`, use `for_each_client_info_safe`.
+static void remove_client(struct client_info* p) {
+    printk(KERN_INFO "umdp: removing client with port ID %u\n", p->port_id);
+    list_del(&p->list);
+    put_pid(p->pid);
+    kfree(p);
+}
+NOKPROBE_SYMBOL(remove_client);
+
 // client_info_list write lock must be acquired when calling this
-static void remove_client(struct pid* pid) {
+static void remove_client_with_pid(struct pid* pid) {
     struct client_info* p;
     struct client_info* next;
     for_each_client_info_safe(p, next) {
         if (p->pid == pid) {
-            printk(KERN_INFO "umdp: removed client with port ID %u\n", p->port_id);
-            list_del(&p->list);
-            put_pid(p->pid);
-            kfree(p);
+            remove_client(p);
         }
     }
 }
-NOKPROBE_SYMBOL(remove_client);
+NOKPROBE_SYMBOL(remove_client_with_pid);
 
 // This gets executed at the start of the `do_exit` kernel function, or, in other words, when a process exits.
 // We can look at its PID to figure out if it is one of our clients, and if so, we remove it and free its resources.
@@ -339,7 +348,7 @@ static int do_exit_handler(struct kprobe* p __attribute__((unused)), struct pt_r
     struct pid* pid = get_task_pid(current, PIDTYPE_PID);
 
     down_write(&client_info_lock);
-    remove_client(pid);
+    remove_client_with_pid(pid);
     up_write(&client_info_lock);
 
     put_pid(pid);
@@ -1035,9 +1044,7 @@ static void umdp_exit(void) {
     struct client_info* p;
     struct client_info* next;
     for_each_client_info_safe(p, next) {
-        list_del(&p->list);
-        put_pid(p->pid);
-        kfree(p);
+        remove_client(p);
     }
     up_write(&client_info_lock);
 }
