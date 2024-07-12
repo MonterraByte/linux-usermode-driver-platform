@@ -15,6 +15,9 @@
 #include <net/netlink.h>
 #include <net/sock.h>
 
+#include "umdp_ac.h"
+#include "umdp_common.h"
+
 MODULE_DESCRIPTION("User mode driver platform");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
@@ -274,11 +277,6 @@ static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
     }
     return NULL;
 }
-
-struct devio_region {
-    u64 start;
-    u64 size;
-};
 
 struct client_info {
     struct list_head list;
@@ -1134,10 +1132,15 @@ static struct class* umdp_mem_dev_class;
 static bool kprobe_registered = false;
 
 static int umdp_init(void) {
-    int ret = alloc_chrdev_region(&umdp_mem_chrdev, 0, 1, UMDP_MEM_DEVICE_NAME);
+    int ret = umdp_ac_init();
+    if (ret != 0) {
+        goto fail;
+    }
+
+    ret = alloc_chrdev_region(&umdp_mem_chrdev, 0, 1, UMDP_MEM_DEVICE_NAME);
     if (ret != 0) {
         printk(KERN_ERR "umdp: Failed to allocate character device (error code %d)\n", -ret);
-        goto fail;
+        goto fail_after_ac_init;
     }
 
     cdev_init(&umdp_mem_cdev, &umdp_mem_fops);
@@ -1207,6 +1210,8 @@ fail_after_class_create:
 fail_after_cdev_init:
     cdev_del(&umdp_mem_cdev);
     unregister_chrdev_region(umdp_mem_chrdev, 1);
+fail_after_ac_init:
+    umdp_ac_exit();
 fail:
     return ret;
 }
@@ -1237,6 +1242,8 @@ static void umdp_exit(void) {
         remove_client(p);
     }
     up_write(&client_info_lock);
+
+    umdp_ac_exit();
 }
 
 module_init(umdp_init);
