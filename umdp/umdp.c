@@ -26,7 +26,6 @@ MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
 
 #define UMDP_DEVICE_NAME "umdp"
 #define UMDP_MAX_PORT_ALLOCATIONS 16
-#define UMDP_MAX_IRQ_SUBSCRIPTIONS 16
 #define UMDP_WORKQUEUE_NAME "umdp_wq"
 #define UMDP_WORKER_COUNT 32
 
@@ -282,6 +281,9 @@ struct client_info {
     struct list_head list;
     u32 port_id;
     struct pid* pid;
+
+    u32* registered_irqs;
+    size_t registered_irqs_count;
 };
 static LIST_HEAD(client_info_list);
 static DECLARE_RWSEM(client_info_lock);
@@ -299,6 +301,8 @@ static bool register_client(u32 port_id, struct pid* pid) {
     INIT_LIST_HEAD(&client_info->list);
     client_info->port_id = port_id;
     client_info->pid = pid;
+    client_info->registered_irqs = NULL;
+    client_info->registered_irqs_count = 0;
 
     list_add_tail(&client_info->list, &client_info_list);
     return true;
@@ -318,6 +322,8 @@ static bool register_client_if_not_registered(u32 port_id, struct pid* pid) {
     return register_client(port_id, pid);
 }
 
+static bool client_info_is_subscribed_to_irq(struct client_info* info, u32 irq);
+
 /// Removes a `struct client_info` from the list it's contained in, and releases its resources
 ///
 /// `client_info_list` write lock must be acquired when calling this.
@@ -325,6 +331,26 @@ static bool register_client_if_not_registered(u32 port_id, struct pid* pid) {
 static void remove_client(struct client_info* p) {
     printk(KERN_INFO "umdp: removing client with port ID %u\n", p->port_id);
     list_del(&p->list);
+
+    for (size_t i = 0; i < p->registered_irqs_count; i++) {
+        u32 irq = p->registered_irqs[i];
+
+        bool registered_by_another_client = false;
+        struct client_info* other;
+        for_each_client_info(other) {
+            if (client_info_is_subscribed_to_irq(other, irq)) {
+                registered_by_another_client = true;
+                break;
+            }
+        }
+
+        if (!registered_by_another_client) {
+            free_irq(irq, &client_info_list);
+            printk(KERN_INFO "umdp: IRQ %u was freed as it is no longer being used\n", irq);
+        }
+    }
+    kfree(p->registered_irqs);
+
     put_pid(p->pid);
     kfree(p);
 }
@@ -733,13 +759,6 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
     return 0;
 }
 
-struct ih_data {
-    u32 registered_irqs[UMDP_MAX_IRQ_SUBSCRIPTIONS];
-    size_t registered_irq_count;
-};
-static struct ih_data ih_data;
-DEFINE_MUTEX(ih_data_mutex);
-
 static struct workqueue_struct* ih_workqueue;
 void interrupt_handler_wq(struct work_struct* ws);
 
@@ -805,6 +824,15 @@ void interrupt_handler_wq(struct work_struct* ws) {
     work->busy = false;
 }
 
+static bool client_info_is_subscribed_to_irq(struct client_info* info, u32 irq) {
+    for (size_t i = 0; i < info->registered_irqs_count; i++) {
+        if (info->registered_irqs[i] == irq) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info) {
     struct nlattr* irq_attr = find_attribute(info->attrs, UMDP_ATTR_INTERRUPT_IRQ);
     if (irq_attr == NULL) {
@@ -813,36 +841,68 @@ static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info)
     }
     u32 irq = *((u32*) nla_data(irq_attr));
 
-    mutex_lock(&ih_data_mutex);
+    down_write(&client_info_lock);
 
-    size_t i;
-    for (i = 0; i < ih_data.registered_irq_count; i++) {
-        if (ih_data.registered_irqs[i] == irq) {
-            mutex_unlock(&ih_data_mutex);
-            return 0;
+    bool irq_already_registered = false;
+    struct client_info* this_client_info = NULL;
+    struct client_info* client_info;
+    for_each_client_info(client_info) {
+        bool irq_already_registered_by_this_client = client_info_is_subscribed_to_irq(client_info, irq);
+        if (!irq_already_registered) {
+            irq_already_registered = irq_already_registered_by_this_client;
+        }
+
+        if (client_info->port_id == info->snd_portid) {
+            if (irq_already_registered_by_this_client) {
+                // already subscribed, do nothing
+                up_write(&client_info_lock);
+                printk(KERN_INFO "umdp: port ID %u is already subscribed to IRQ %u, ignoring request\n",
+                    info->snd_portid, irq);
+                return 0;
+            }
+            this_client_info = client_info;
+        }
+
+        if (this_client_info != NULL && irq_already_registered) {
+            break;
         }
     }
 
-    if (ih_data.registered_irq_count == UMDP_MAX_IRQ_SUBSCRIPTIONS) {
-        mutex_unlock(&ih_data_mutex);
-        printk(KERN_ERR "umdp: reached interrupt subscription limit, cannot register another one\n");
-        return -EBUSY;
+    if (this_client_info == NULL) {
+        up_write(&client_info_lock);
+        printk(KERN_INFO "umdp: port ID %u is not registered, refusing request\n", info->snd_portid);
+        return -EPERM;
     }
 
-    // TODO: allow the user to decide if they want IRQF_SHARED
-    int ret = request_irq(irq, interrupt_handler, IRQF_SHARED, UMDP_DEVICE_NAME, &ih_data);
-    if (ret != 0) {
-        mutex_unlock(&ih_data_mutex);
-        printk(KERN_ERR "umdp: IRQ request failed with code %d\n", ret);
-        return ret;
+    u32* new_irqs = krealloc_array(
+        this_client_info->registered_irqs, this_client_info->registered_irqs_count + 1, sizeof(u32), GFP_KERNEL);
+    if (new_irqs == NULL) {
+        up_write(&client_info_lock);
+        printk(KERN_ERR "umdp: failed to resize IRQ array\n");
+        return -ENOMEM;
+    }
+    this_client_info->registered_irqs = new_irqs;
+    this_client_info->registered_irqs[this_client_info->registered_irqs_count] = irq;
+    this_client_info->registered_irqs_count++;
+
+    if (!irq_already_registered) {
+        int ret = request_irq(irq, interrupt_handler, IRQF_SHARED, UMDP_DEVICE_NAME, &client_info_list);
+        if (ret != 0) {
+            this_client_info->registered_irqs_count--;
+            // we could shrink the allocation, but it doesn't seem worth complicating the code further
+
+            up_write(&client_info_lock);
+            printk(KERN_ERR "umdp: IRQ request failed with code %d\n", ret);
+            return ret;
+        }
     }
 
-    ih_data.registered_irq_count++;
-    ih_data.registered_irqs[ih_data.registered_irq_count - 1] = irq;
+    up_write(&client_info_lock);
 
-    mutex_unlock(&ih_data_mutex);
-    printk(KERN_INFO "umdp: subscribed to IRQ %u\n", irq);
-    printk(KERN_INFO "umdp: client port id: %u\n", info->snd_portid);
+    if (!irq_already_registered) {
+        printk(KERN_INFO "umdp: IRQ %u was allocated\n", irq);
+    }
+    printk(KERN_INFO "umdp: port ID %u subscribed to IRQ %u\n", info->snd_portid, irq);
     return 0;
 }
 
@@ -854,31 +914,63 @@ static int umdp_interrupt_unsubscribe(struct sk_buff* skb, struct genl_info* inf
     }
     u32 irq = *((u32*) nla_data(irq_attr));
 
-    mutex_lock(&ih_data_mutex);
+    down_write(&client_info_lock);
+
+    bool irq_registered_by_others = false;
+    struct client_info* this_client_info = NULL;
+    struct client_info* client_info;
+    for_each_client_info(client_info) {
+        bool irq_registered_by_this_client = client_info_is_subscribed_to_irq(client_info, irq);
+
+        if (client_info->port_id == info->snd_portid) {
+            if (!irq_registered_by_this_client) {
+                // not subscribed, do nothing
+                up_write(&client_info_lock);
+                printk(KERN_INFO "umdp: port ID %u is not subscribed to IRQ %u, so it cannot be unsubscribed\n",
+                    info->snd_portid, irq);
+                return -ENOENT;
+            }
+            this_client_info = client_info;
+        } else if (irq_registered_by_this_client) {
+            irq_registered_by_others = true;
+        }
+
+        if (this_client_info != NULL && irq_registered_by_others) {
+            break;
+        }
+    }
+
+    if (this_client_info == NULL) {
+        up_write(&client_info_lock);
+        printk(KERN_INFO "umdp: port ID %u is not registered, refusing request\n", info->snd_portid);
+        return -EPERM;
+    }
 
     size_t irq_index = SIZE_MAX;
     size_t i;
-    for (i = 0; i < ih_data.registered_irq_count; i++) {
-        if (ih_data.registered_irqs[i] == irq) {
+    for (i = 0; i < this_client_info->registered_irqs_count; i++) {
+        if (this_client_info->registered_irqs[i] == irq) {
             irq_index = i;
             break;
         }
     }
 
-    if (irq_index == SIZE_MAX) {
-        mutex_unlock(&ih_data_mutex);
-        printk(KERN_ERR "umdp: IRQ %u isn't registered, so it cannot be unregistered\n", irq);
-        return -ENOENT;
+    this_client_info->registered_irqs_count--;
+    for (i = irq_index; i < this_client_info->registered_irqs_count; i++) {
+        this_client_info->registered_irqs[i] = this_client_info->registered_irqs[i + 1];
+    }
+    // we could shrink the allocation, but it doesn't seem worth complicating the code further
+
+    if (!irq_registered_by_others) {
+        free_irq(irq, &client_info_list);
     }
 
-    ih_data.registered_irq_count--;
-    for (i = irq_index; i < ih_data.registered_irq_count; i++) {
-        ih_data.registered_irqs[i] = ih_data.registered_irqs[i + 1];
-    }
+    up_write(&client_info_lock);
 
-    free_irq(irq, &ih_data);
-    mutex_unlock(&ih_data_mutex);
-    printk(KERN_INFO "umdp: unsubscribed from IRQ %u\n", irq);
+    printk(KERN_INFO "umdp: port ID %u unsubscribed from IRQ %u\n", info->snd_portid, irq);
+    if (!irq_registered_by_others) {
+        printk(KERN_INFO "umdp: IRQ %u was freed as it is no longer being used\n", irq);
+    }
     return 0;
 }
 
@@ -925,7 +1017,6 @@ static bool kprobe_registered = false;
 
 static int umdp_init(void) {
     devio_data.allocated_region_count = 0;
-    ih_data.registered_irq_count = 0;
 
     int ret = alloc_chrdev_region(&umdp_mem_chrdev, 0, 1, UDMP_MEM_DEVICE_NAME);
     if (ret != 0) {
@@ -1018,18 +1109,9 @@ static void umdp_exit(void) {
 
     destroy_workqueue(ih_workqueue);
 
-    mutex_lock(&ih_data_mutex);
-
-    size_t i;
-    for (i = 0; i < ih_data.registered_irq_count; i++) {
-        free_irq(ih_data.registered_irqs[i], &ih_data);
-    }
-
-    mutex_unlock(&ih_data_mutex);
-
     mutex_lock(&devio_data_mutex);
 
-    for (i = 0; i < devio_data.allocated_region_count; i++) {
+    for (size_t i = 0; i < devio_data.allocated_region_count; i++) {
         release_region(devio_data.allocated_regions[i].start, devio_data.allocated_regions[i].size);
     }
 
