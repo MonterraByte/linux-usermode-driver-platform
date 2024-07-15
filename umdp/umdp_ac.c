@@ -34,6 +34,28 @@ static void remove_permission_entry(struct permission_entry* p) {
     kfree(p);
 }
 
+bool umdp_ac_can_access_irq(const char* exe_path, u32 irq) {
+    down_read(&permission_lock);
+
+    struct permission_entry* entry;
+    for_each_permission(entry) {
+        if (strcmp(exe_path, entry->path) != 0) {
+            continue;
+        }
+
+        for (size_t i = 0; i < entry->allowed_irq_lines_count; i++) {
+            if (entry->allowed_irq_lines[i] == irq) {
+                up_read(&permission_lock);
+                return true;
+            }
+        }
+        break;
+    }
+
+    up_read(&permission_lock);
+    return false;
+}
+
 #define UMDP_PROC_DIR_NAME "umdp"
 
 static struct proc_dir_entry* umdp_proc_dir = NULL;

@@ -1062,6 +1062,11 @@ static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info)
         return -EPERM;
     }
 
+    if (!umdp_ac_can_access_irq(this_client_info->exe_path, irq)) {
+        printk(KERN_INFO "umdp: %s not allowed to access IRQ %u, refusing request\n", this_client_info->exe_path, irq);
+        return -EPERM;
+    }
+
     u32* new_irqs = krealloc_array(
         this_client_info->registered_irqs, this_client_info->registered_irqs_count + 1, sizeof(u32), GFP_KERNEL);
     if (new_irqs == NULL) {
