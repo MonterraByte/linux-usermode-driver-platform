@@ -1010,15 +1010,15 @@ static struct cdev umdp_mem_cdev;
 static dev_t umdp_mem_chrdev;
 static struct class* umdp_mem_dev_class;
 
-#define UDMP_MEM_CLASS_NAME "umdp"
-#define UDMP_MEM_DEVICE_NAME "umdp-mem"
+#define UMDP_MEM_CLASS_NAME "umdp"
+#define UMDP_MEM_DEVICE_NAME "umdp-mem"
 
 static bool kprobe_registered = false;
 
 static int umdp_init(void) {
     devio_data.allocated_region_count = 0;
 
-    int ret = alloc_chrdev_region(&umdp_mem_chrdev, 0, 1, UDMP_MEM_DEVICE_NAME);
+    int ret = alloc_chrdev_region(&umdp_mem_chrdev, 0, 1, UMDP_MEM_DEVICE_NAME);
     if (ret != 0) {
         printk(KERN_ERR "umdp: Failed to allocate character device (error code %d)\n", -ret);
         goto fail;
@@ -1026,7 +1026,7 @@ static int umdp_init(void) {
 
     cdev_init(&umdp_mem_cdev, &umdp_mem_fops);
     umdp_mem_cdev.owner = THIS_MODULE;
-    ret = kobject_set_name(&umdp_mem_cdev.kobj, UDMP_MEM_DEVICE_NAME);
+    ret = kobject_set_name(&umdp_mem_cdev.kobj, UMDP_MEM_DEVICE_NAME);
     if (ret != 0) {
         printk(KERN_ERR "umdp: Failed to set character device name (error code %d)\n", -ret);
         goto fail_after_cdev_init;
@@ -1038,7 +1038,7 @@ static int umdp_init(void) {
         goto fail_after_cdev_init;
     }
 
-    umdp_mem_dev_class = class_create(UDMP_MEM_CLASS_NAME);
+    umdp_mem_dev_class = class_create(UMDP_MEM_CLASS_NAME);
     if (IS_ERR(umdp_mem_dev_class)) {
         ret = (int) PTR_ERR(umdp_mem_dev_class);
         printk(KERN_ERR "umdp: Failed to create character device class (error code %d)\n", -ret);
@@ -1046,7 +1046,7 @@ static int umdp_init(void) {
     }
 
     struct device* umdp_mem_device =
-        device_create(umdp_mem_dev_class, NULL, umdp_mem_chrdev, NULL, UDMP_MEM_DEVICE_NAME);
+        device_create(umdp_mem_dev_class, NULL, umdp_mem_chrdev, NULL, UMDP_MEM_DEVICE_NAME);
     if (IS_ERR(umdp_mem_device)) {
         ret = (int) PTR_ERR(umdp_mem_device);
         printk(KERN_ERR "umdp: Failed to create character device (error code %d)\n", -ret);
