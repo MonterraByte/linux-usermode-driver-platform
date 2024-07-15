@@ -8,7 +8,6 @@
 #include <linux/list.h>
 #include <linux/mm.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <linux/pid.h>
 #include <linux/rwsem.h>
 #include <linux/workqueue.h>
@@ -25,7 +24,6 @@ MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
 #define UMDP_GENL_INTERRUPT_MULTICAST_NAME "interrupt"
 
 #define UMDP_DEVICE_NAME "umdp"
-#define UMDP_MAX_PORT_ALLOCATIONS 16
 #define UMDP_WORKQUEUE_NAME "umdp_wq"
 #define UMDP_WORKER_COUNT 32
 
@@ -277,6 +275,11 @@ static struct nlattr* find_attribute(struct nlattr** attributes, int type) {
     return NULL;
 }
 
+struct devio_region {
+    u64 start;
+    u64 size;
+};
+
 struct client_info {
     struct list_head list;
     u32 port_id;
@@ -284,6 +287,9 @@ struct client_info {
 
     u32* registered_irqs;
     size_t registered_irqs_count;
+
+    struct devio_region* requested_port_io_regions;
+    size_t requested_port_io_regions_count;
 };
 static LIST_HEAD(client_info_list);
 static DECLARE_RWSEM(client_info_lock);
@@ -303,6 +309,8 @@ static bool register_client(u32 port_id, struct pid* pid) {
     client_info->pid = pid;
     client_info->registered_irqs = NULL;
     client_info->registered_irqs_count = 0;
+    client_info->requested_port_io_regions = NULL;
+    client_info->requested_port_io_regions_count = 0;
 
     list_add_tail(&client_info->list, &client_info_list);
     return true;
@@ -323,6 +331,7 @@ static bool register_client_if_not_registered(u32 port_id, struct pid* pid) {
 }
 
 static bool client_info_is_subscribed_to_irq(struct client_info* info, u32 irq);
+static bool client_info_requested_port_region(struct client_info* info, struct devio_region region);
 
 /// Removes a `struct client_info` from the list it's contained in, and releases its resources
 ///
@@ -350,6 +359,26 @@ static void remove_client(struct client_info* p) {
         }
     }
     kfree(p->registered_irqs);
+
+    for (size_t i = 0; i < p->requested_port_io_regions_count; i++) {
+        struct devio_region region = p->requested_port_io_regions[i];
+
+        bool requested_by_another_client = false;
+        struct client_info* other;
+        for_each_client_info(other) {
+            if (client_info_requested_port_region(other, region)) {
+                requested_by_another_client = true;
+                break;
+            }
+        }
+
+        if (!requested_by_another_client) {
+            release_region(region.start, region.size);
+            printk(KERN_INFO "umdp: I/O region %llu - %llu was released as it is no longer being used\n", region.start,
+                region.start + region.size - 1);
+        }
+    }
+    kfree(p->requested_port_io_regions);
 
     put_pid(p->pid);
     kfree(p);
@@ -387,6 +416,17 @@ static struct kprobe do_exit_kp = {
     .pre_handler = do_exit_handler,
     .post_handler = NULL,
 };
+
+// client_info_list read lock must be acquired when calling this
+static struct client_info* get_client_info_by_netlink_port_id(u32 port_id) {
+    struct client_info* client_info;
+    for_each_client_info(client_info) {
+        if (client_info->port_id == port_id) {
+            return client_info;
+        }
+    }
+    return NULL;
+}
 
 // `struct netlink_sock` is defined in `net/netlink/af_netlink.h` in the kernel source code, which isn't part of the "public" headers.
 // However, we need to access the portid.
@@ -485,34 +525,10 @@ static int umdp_connect(struct sk_buff* skb, struct genl_info* info) {
     return 0;
 }
 
-struct devio_region {
-    u64 start;
-    u64 size;
-};
-
-struct devio_data {
-    struct devio_region allocated_regions[UMDP_MAX_PORT_ALLOCATIONS];
-    size_t allocated_region_count;
-};
-static struct devio_data devio_data;
-DEFINE_MUTEX(devio_data_mutex);
-
-static size_t find_allocated_region_index(struct devio_region* region) {
-    size_t i;
-    for (i = 0; i < devio_data.allocated_region_count; i++) {
-        if (devio_data.allocated_regions[i].start == region->start
-            && devio_data.allocated_regions[i].size == region->size) {
-            return i;
-        }
-    }
-    return SIZE_MAX;
-}
-
-static bool is_ioport_allocated(u64 port) {
-    size_t i;
-    for (i = 0; i < devio_data.allocated_region_count; i++) {
-        u64 start = devio_data.allocated_regions[i].start;
-        u64 size = devio_data.allocated_regions[i].size;
+static bool client_has_ioport_allocated(struct client_info* client_info, u64 port) {
+    for (size_t i = 0; i < client_info->requested_port_io_regions_count; i++) {
+        u64 start = client_info->requested_port_io_regions[i].start;
+        u64 size = client_info->requested_port_io_regions[i].size;
         if (start <= port && port < start + size) {
             return true;
         }
@@ -530,15 +546,22 @@ static int umdp_devio_read(struct sk_buff* skb, struct genl_info* info) {
     }
     u64 port = *(u64*) nla_data(port_attr);
 
-    mutex_lock(&devio_data_mutex);
+    down_read(&client_info_lock);
 
-    if (!is_ioport_allocated(port)) {
-        mutex_unlock(&devio_data_mutex);
-        printk(KERN_ERR "umdp: port %llu isn't registered, so it can't be read from\n", port);
+    struct client_info* client_info = get_client_info_by_netlink_port_id(info->snd_portid);
+    if (client_info == NULL) {
+        up_read(&client_info_lock);
+        printk(KERN_INFO "umdp: port ID %u is not registered, refusing request\n", info->snd_portid);
         return -EPERM;
     }
 
-    mutex_unlock(&devio_data_mutex);
+    if (!client_has_ioport_allocated(client_info, port)) {
+        up_read(&client_info_lock);
+        printk(KERN_ERR "umdp: port %llu wasn't requested, so it can't be read from\n", port);
+        return -EPERM;
+    }
+
+    up_read(&client_info_lock);
 
     struct nlattr* type_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_READ_TYPE);
     if (type_attr == NULL) {
@@ -627,15 +650,22 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
     }
     u64 port = *((u64*) nla_data(port_attr));
 
-    mutex_lock(&devio_data_mutex);
+    down_read(&client_info_lock);
 
-    if (!is_ioport_allocated(port)) {
-        mutex_unlock(&devio_data_mutex);
-        printk(KERN_ERR "umdp: port %llu isn't registered, so it can't be written to\n", port);
+    struct client_info* client_info = get_client_info_by_netlink_port_id(info->snd_portid);
+    if (client_info == NULL) {
+        up_read(&client_info_lock);
+        printk(KERN_INFO "umdp: port ID %u is not registered, refusing request\n", info->snd_portid);
         return -EPERM;
     }
 
-    mutex_unlock(&devio_data_mutex);
+    if (!client_has_ioport_allocated(client_info, port)) {
+        up_read(&client_info_lock);
+        printk(KERN_ERR "umdp: port %llu wasn't requested, so it can't be written to\n", port);
+        return -EPERM;
+    }
+
+    up_read(&client_info_lock);
 
     int i;
     for (i = 0; i < UMDP_ATTR_DEVIO_WRITE_MAX + 1; i++) {
@@ -671,6 +701,16 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
     return -EINVAL;
 }
 
+static bool client_info_requested_port_region(struct client_info* info, struct devio_region region) {
+    for (size_t i = 0; i < info->requested_port_io_regions_count; i++) {
+        if (info->requested_port_io_regions[i].start == region.start
+            && info->requested_port_io_regions[i].size == region.size) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
     struct nlattr* start_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_REQUEST_START);
     struct nlattr* size_attr = find_attribute(info->attrs, UMDP_ATTR_DEVIO_REQUEST_SIZE);
@@ -689,36 +729,73 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
         return -EINVAL;
     }
 
-    mutex_lock(&devio_data_mutex);
+    down_write(&client_info_lock);
 
-    if (find_allocated_region_index(&region) != SIZE_MAX) {
-        // already allocated
-        mutex_unlock(&devio_data_mutex);
-        return 0;
-    }
+    bool region_already_requested = false;
+    struct client_info* this_client_info = NULL;
+    struct client_info* client_info;
+    for_each_client_info(client_info) {
+        bool region_already_requested_by_this_client = client_info_requested_port_region(client_info, region);
+        if (!region_already_requested) {
+            region_already_requested = region_already_requested_by_this_client;
+        }
 
-    if (devio_data.allocated_region_count == UMDP_MAX_PORT_ALLOCATIONS) {
-        mutex_unlock(&devio_data_mutex);
-        printk(KERN_ERR "umdp: reached port allocation limit, cannot register another one\n");
-        return -EBUSY;
-    }
+        if (client_info->port_id == info->snd_portid) {
+            if (region_already_requested_by_this_client) {
+                // already subscribed, do nothing
+                up_write(&client_info_lock);
+                printk(KERN_INFO "umdp: port ID %u already requested region %llu - %llu, ignoring request\n",
+                    info->snd_portid, region.start, region.start + region.size - 1);
+                return 0;
+            }
+            this_client_info = client_info;
+        }
 
-    if (request_region(region.start, region.size, UMDP_DEVICE_NAME) == NULL) {
-        release_region(region.start, region.size);
-        if (request_region(region.start, region.size, UMDP_DEVICE_NAME) == NULL) {
-            mutex_unlock(&devio_data_mutex);
-            printk(KERN_ERR "umdp: failed to request region %llu - %llu, it's currently unavailable\n", region.start,
-                region.start + region.size - 1);
-            return -EBUSY;
+        if (this_client_info != NULL && region_already_requested) {
+            break;
         }
     }
 
-    devio_data.allocated_region_count++;
-    devio_data.allocated_regions[devio_data.allocated_region_count - 1] = region;
+    if (this_client_info == NULL) {
+        up_write(&client_info_lock);
+        printk(KERN_INFO "umdp: port ID %u is not registered, refusing request\n", info->snd_portid);
+        return -EPERM;
+    }
 
-    mutex_unlock(&devio_data_mutex);
-    printk(
-        KERN_DEBUG "umdp: region %llu - %llu allocated successfully\n", region.start, region.start + region.size - 1);
+    struct devio_region* new_regions = krealloc_array(this_client_info->requested_port_io_regions,
+        this_client_info->requested_port_io_regions_count + 1, sizeof(struct devio_region), GFP_KERNEL);
+    if (new_regions == NULL) {
+        up_write(&client_info_lock);
+        printk(KERN_ERR "umdp: failed to resize I/O port region array\n");
+        return -ENOMEM;
+    }
+    this_client_info->requested_port_io_regions = new_regions;
+    this_client_info->requested_port_io_regions[this_client_info->requested_port_io_regions_count].start = region.start;
+    this_client_info->requested_port_io_regions[this_client_info->requested_port_io_regions_count].size = region.size;
+    this_client_info->requested_port_io_regions_count++;
+
+    if (!region_already_requested) {
+        if (request_region(region.start, region.size, UMDP_DEVICE_NAME) == NULL) {
+            release_region(region.start, region.size);
+            if (request_region(region.start, region.size, UMDP_DEVICE_NAME) == NULL) {
+                this_client_info->requested_port_io_regions_count--;
+                // we could shrink the allocation, but it doesn't seem worth complicating the code further
+
+                up_write(&client_info_lock);
+                printk(KERN_ERR "umdp: failed to request region %llu - %llu, it's currently unavailable\n",
+                    region.start, region.start + region.size - 1);
+                return -EBUSY;
+            }
+        }
+    }
+
+    up_write(&client_info_lock);
+
+    if (!region_already_requested) {
+        printk(KERN_INFO "umdp: I/O region %llu - %llu was allocated\n", region.start, region.start + region.size - 1);
+    }
+    printk(KERN_INFO "umdp: port ID %u requested I/O region %llu - %llu successfully\n", info->snd_portid, region.start,
+        region.start + region.size - 1);
     return 0;
 }
 
@@ -737,25 +814,66 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
     printk(KERN_DEBUG "umdp: received release request for region %llu - %llu\n", region.start,
         region.start + region.size - 1);
 
-    mutex_lock(&devio_data_mutex);
+    down_write(&client_info_lock);
 
-    size_t port_index = find_allocated_region_index(&region);
-    if (port_index == SIZE_MAX) {
-        mutex_unlock(&devio_data_mutex);
-        printk(KERN_ERR "umdp: region %llu - %llu isn't allocated, so it cannot be released\n", region.start,
-            region.start + region.size - 1);
-        return -ENOENT;
+    bool region_requested_by_others = false;
+    struct client_info* this_client_info = NULL;
+    struct client_info* client_info;
+    for_each_client_info(client_info) {
+        bool irq_registered_by_this_client = client_info_requested_port_region(client_info, region);
+
+        if (client_info->port_id == info->snd_portid) {
+            if (!irq_registered_by_this_client) {
+                // not requested, do nothing
+                up_write(&client_info_lock);
+                printk(KERN_INFO "umdp: port ID %u didn't request region %llu - %llu, so it can't release it\n",
+                    info->snd_portid, region.start, region.start + region.size - 1);
+                return -ENOENT;
+            }
+            this_client_info = client_info;
+        } else if (irq_registered_by_this_client) {
+            region_requested_by_others = true;
+        }
+
+        if (this_client_info != NULL && region_requested_by_others) {
+            break;
+        }
     }
 
-    devio_data.allocated_region_count--;
+    if (this_client_info == NULL) {
+        up_write(&client_info_lock);
+        printk(KERN_INFO "umdp: port ID %u is not registered, refusing request\n", info->snd_portid);
+        return -EPERM;
+    }
+
+    size_t region_index = SIZE_MAX;
     size_t i;
-    for (i = port_index; i < devio_data.allocated_region_count; i++) {
-        devio_data.allocated_regions[i] = devio_data.allocated_regions[i + 1];
+    for (i = 0; i < this_client_info->requested_port_io_regions_count; i++) {
+        if (this_client_info->requested_port_io_regions[i].start == region.start
+            && this_client_info->requested_port_io_regions[i].size == region.size) {
+            region_index = i;
+            break;
+        }
     }
 
-    release_region(region.start, region.size);
-    mutex_unlock(&devio_data_mutex);
-    printk(KERN_DEBUG "umdp: region %llu - %llu released successfully\n", region.start, region.start + region.size - 1);
+    this_client_info->requested_port_io_regions_count--;
+    for (i = region_index; i < this_client_info->requested_port_io_regions_count; i++) {
+        this_client_info->requested_port_io_regions[i] = this_client_info->requested_port_io_regions[i + 1];
+    }
+    // we could shrink the allocation, but it doesn't seem worth complicating the code further
+
+    if (!region_requested_by_others) {
+        release_region(region.start, region.size);
+    }
+
+    up_write(&client_info_lock);
+
+    printk(KERN_INFO "umdp: port ID %u released I/O region %llu - %llu\n", info->snd_portid, region.start,
+        region.start + region.size - 1);
+    if (!region_requested_by_others) {
+        printk(KERN_INFO "umdp: I/O region %llu - %llu was released as it is no longer being used\n", region.start,
+            region.start + region.size - 1);
+    }
     return 0;
 }
 
@@ -1016,8 +1134,6 @@ static struct class* umdp_mem_dev_class;
 static bool kprobe_registered = false;
 
 static int umdp_init(void) {
-    devio_data.allocated_region_count = 0;
-
     int ret = alloc_chrdev_region(&umdp_mem_chrdev, 0, 1, UMDP_MEM_DEVICE_NAME);
     if (ret != 0) {
         printk(KERN_ERR "umdp: Failed to allocate character device (error code %d)\n", -ret);
@@ -1108,14 +1224,6 @@ static void umdp_exit(void) {
     }
 
     destroy_workqueue(ih_workqueue);
-
-    mutex_lock(&devio_data_mutex);
-
-    for (size_t i = 0; i < devio_data.allocated_region_count; i++) {
-        release_region(devio_data.allocated_regions[i].start, devio_data.allocated_regions[i].size);
-    }
-
-    mutex_unlock(&devio_data_mutex);
 
     device_destroy(umdp_mem_dev_class, umdp_mem_chrdev);
     class_destroy(umdp_mem_dev_class);
