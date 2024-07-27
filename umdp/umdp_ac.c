@@ -25,6 +25,16 @@ static DECLARE_RWSEM(permission_lock);
 #define for_each_permission(p) list_for_each_entry(p, &permission_list, list)
 #define for_each_permission_safe(p, next) list_for_each_entry_safe(p, next, &permission_list, list)
 
+static struct permission_entry* get_permission_entry_by_exe_path(const char* exe_path) {
+    struct permission_entry* entry;
+    for_each_permission(entry) {
+        if (strcmp(exe_path, entry->path) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
 static void remove_permission_entry(struct permission_entry* p) {
     list_del(&p->list);
     kfree(p->path);
@@ -37,19 +47,14 @@ static void remove_permission_entry(struct permission_entry* p) {
 bool umdp_ac_can_access_irq(const char* exe_path, u32 irq) {
     down_read(&permission_lock);
 
-    struct permission_entry* entry;
-    for_each_permission(entry) {
-        if (strcmp(exe_path, entry->path) != 0) {
-            continue;
-        }
-
+    struct permission_entry* entry = get_permission_entry_by_exe_path(exe_path);
+    if (entry != NULL) {
         for (size_t i = 0; i < entry->allowed_irq_lines_count; i++) {
             if (entry->allowed_irq_lines[i] == irq) {
                 up_read(&permission_lock);
                 return true;
             }
         }
-        break;
     }
 
     up_read(&permission_lock);
