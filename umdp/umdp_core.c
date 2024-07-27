@@ -896,10 +896,10 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
     struct client_info* this_client_info = NULL;
     struct client_info* client_info;
     for_each_client_info(client_info) {
-        bool irq_registered_by_this_client = client_info_requested_port_region(client_info, region);
+        bool region_registered_by_this_client = client_info_requested_port_region(client_info, region);
 
         if (client_info->port_id == info->snd_portid) {
-            if (!irq_registered_by_this_client) {
+            if (!region_registered_by_this_client) {
                 // not requested, do nothing
                 up_write(&client_info_lock);
                 printk(KERN_INFO "umdp: port ID %u didn't request region %llu - %llu, so it can't release it\n",
@@ -907,7 +907,7 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
                 return -ENOENT;
             }
             this_client_info = client_info;
-        } else if (irq_registered_by_this_client) {
+        } else if (region_registered_by_this_client) {
             region_requested_by_others = true;
         }
 
