@@ -61,6 +61,26 @@ bool umdp_ac_can_access_irq(const char* exe_path, u32 irq) {
     return false;
 }
 
+bool umdp_ac_can_access_port_io_region(const char* exe_path, struct port_io_region region) {
+    u64 region_end = region.start + (region.size - 1u);
+    down_read(&permission_lock);
+
+    struct permission_entry* entry = get_permission_entry_by_exe_path(exe_path);
+    if (entry != NULL) {
+        for (size_t i = 0; i < entry->allowed_port_io_regions_count; i++) {
+            u64 allowed_start = entry->allowed_port_io_regions[i].start;
+            u64 allowed_end = allowed_start + (entry->allowed_port_io_regions[i].size - 1u);
+            if (region.start >= allowed_start && region_end <= allowed_end) {
+                up_read(&permission_lock);
+                return true;
+            }
+        }
+    }
+
+    up_read(&permission_lock);
+    return false;
+}
+
 #define UMDP_PROC_DIR_NAME "umdp"
 
 static struct proc_dir_entry* umdp_proc_dir = NULL;

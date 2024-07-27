@@ -838,6 +838,13 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
         return -EPERM;
     }
 
+    if (!umdp_ac_can_access_port_io_region(this_client_info->exe_path, region)) {
+        up_write(&client_info_lock);
+        printk(KERN_INFO "umdp: %s not allowed to access the requested region, refusing request\n",
+            this_client_info->exe_path);
+        return -EPERM;
+    }
+
     struct port_io_region* new_regions = krealloc_array(this_client_info->requested_port_io_regions,
         this_client_info->requested_port_io_regions_count + 1, sizeof(struct port_io_region), GFP_KERNEL);
     if (new_regions == NULL) {
