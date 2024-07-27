@@ -1198,11 +1198,25 @@ static int umdp_mem_mmap(struct file* file __attribute__((unused)), struct vm_ar
         return -EINVAL;
     }
 
+    unsigned long physical_start_addr = vma->vm_pgoff * PAGE_SIZE;
+    unsigned long physical_end_addr = physical_start_addr + (vma->vm_end - vma->vm_start);
+
+    const char* exe_path = exe_path_of_task(current);
+    if (exe_path == NULL) {
+        printk(KERN_ERR "umdp: mmap request made from process with no executable, refusing request\n");
+        return -EPERM;
+    }
+    if (!umdp_ac_can_access_mmap_region(
+            exe_path, (struct mmap_region){.start = physical_start_addr, .end = physical_end_addr})) {
+        printk(KERN_INFO "umdp: %s not allowed to access region 0x%lx-0x%lx, refusing request\n", exe_path,
+            physical_start_addr, physical_end_addr);
+        return -EPERM;
+    }
+
     vma->__vm_flags |= VM_IO;
 
-    printk(KERN_DEBUG "umdp: performing mmap of region 0x%lx-0x%lx to address 0x%lu of PID %d\n",
-        vma->vm_pgoff * PAGE_SIZE, vma->vm_pgoff * PAGE_SIZE + (vma->vm_end - vma->vm_start), vma->vm_start,
-        current->pid);
+    printk(KERN_DEBUG "umdp: performing mmap of region 0x%lx-0x%lx to address 0x%lu of PID %d\n", physical_start_addr,
+        physical_end_addr, vma->vm_start, current->pid);
     return io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff, vma->vm_end - vma->vm_start, vma->vm_page_prot);
 }
 

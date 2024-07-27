@@ -61,6 +61,25 @@ bool umdp_ac_can_access_irq(const char* exe_path, u32 irq) {
     return false;
 }
 
+bool umdp_ac_can_access_mmap_region(const char* exe_path, struct mmap_region region) {
+    down_read(&permission_lock);
+
+    struct permission_entry* entry = get_permission_entry_by_exe_path(exe_path);
+    if (entry != NULL) {
+        for (size_t i = 0; i < entry->allowed_mmap_regions_count; i++) {
+            unsigned long allowed_start = entry->allowed_mmap_regions[i].start;
+            unsigned long allowed_end = entry->allowed_mmap_regions[i].end;
+            if (region.start >= allowed_start && region.end <= allowed_end) {
+                up_read(&permission_lock);
+                return true;
+            }
+        }
+    }
+
+    up_read(&permission_lock);
+    return false;
+}
+
 bool umdp_ac_can_access_port_io_region(const char* exe_path, struct port_io_region region) {
     u64 region_end = region.start + (region.size - 1u);
     down_read(&permission_lock);
