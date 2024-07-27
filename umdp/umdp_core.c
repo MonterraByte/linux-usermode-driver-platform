@@ -1076,6 +1076,7 @@ static int umdp_interrupt_subscribe(struct sk_buff* skb, struct genl_info* info)
     }
 
     if (!umdp_ac_can_access_irq(this_client_info->exe_path, irq)) {
+        up_write(&client_info_lock);
         printk(KERN_INFO "umdp: %s not allowed to access IRQ %u, refusing request\n", this_client_info->exe_path, irq);
         return -EPERM;
     }
