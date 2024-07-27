@@ -17,8 +17,8 @@ struct permission_entry {
     struct mmap_region* allowed_mmap_regions;
     size_t allowed_mmap_regions_count;
 
-    struct devio_region* allowed_devio_regions;
-    size_t allowed_devio_regions_count;
+    struct port_io_region* allowed_port_io_regions;
+    size_t allowed_port_io_regions_count;
 };
 static LIST_HEAD(permission_list);
 static DECLARE_RWSEM(permission_lock);
@@ -40,7 +40,7 @@ static void remove_permission_entry(struct permission_entry* p) {
     kfree(p->path);
     kfree(p->allowed_irq_lines);
     kfree(p->allowed_mmap_regions);
-    kfree(p->allowed_devio_regions);
+    kfree(p->allowed_port_io_regions);
     kfree(p);
 }
 
@@ -95,10 +95,10 @@ static int permtab_show(struct seq_file* s, void* data __attribute__((unused))) 
         }
         seq_putc(s, '\t');
 
-        if (entry->allowed_devio_regions_count > 0) {
-            for (i = 0; i < entry->allowed_devio_regions_count; i++) {
-                seq_printf(s, i == 0 ? "0x%llx-0x%llx" : ",0x%llx-0x%llx", entry->allowed_devio_regions[i].start,
-                    entry->allowed_devio_regions[i].start + entry->allowed_devio_regions[i].size);
+        if (entry->allowed_port_io_regions_count > 0) {
+            for (i = 0; i < entry->allowed_port_io_regions_count; i++) {
+                seq_printf(s, i == 0 ? "0x%llx-0x%llx" : ",0x%llx-0x%llx", entry->allowed_port_io_regions[i].start,
+                    entry->allowed_port_io_regions[i].start + entry->allowed_port_io_regions[i].size);
             }
         } else {
             seq_puts(s, "none");
@@ -127,10 +127,10 @@ enum permtab_parse_state {
 
 static int build_and_add_permission_entry(struct list_head* list_head, char* path, u32* allowed_irq_lines,
     size_t allowed_irq_lines_count, struct mmap_region* allowed_mmap_regions, size_t allowed_mmap_regions_count,
-    struct devio_region* allowed_devio_regions, size_t allowed_devio_regions_count) {
+    struct port_io_region* allowed_port_io_regions, size_t allowed_port_io_regions_count) {
     if (path == NULL || (allowed_irq_lines_count > 0 && allowed_irq_lines == NULL)
         || (allowed_mmap_regions_count > 0 && allowed_mmap_regions == NULL)
-        || (allowed_devio_regions_count > 0 && allowed_devio_regions == NULL)) {
+        || (allowed_port_io_regions_count > 0 && allowed_port_io_regions == NULL)) {
         // sanity check failed
         printk(KERN_ERR "umdp: bug?");
         return -EINVAL;
@@ -147,8 +147,8 @@ static int build_and_add_permission_entry(struct list_head* list_head, char* pat
     entry->allowed_irq_lines_count = allowed_irq_lines_count;
     entry->allowed_mmap_regions = allowed_mmap_regions;
     entry->allowed_mmap_regions_count = allowed_mmap_regions_count;
-    entry->allowed_devio_regions = allowed_devio_regions;
-    entry->allowed_devio_regions_count = allowed_devio_regions_count;
+    entry->allowed_port_io_regions = allowed_port_io_regions;
+    entry->allowed_port_io_regions_count = allowed_port_io_regions_count;
 
     list_add_tail(&entry->list, list_head);
     printk(KERN_DEBUG "umdp: added rule for path %s\n", entry->path);
@@ -157,10 +157,10 @@ static int build_and_add_permission_entry(struct list_head* list_head, char* pat
 
 static int finish_current_entry_and_reset_(enum permtab_parse_state* state, struct list_head* list_head, char** path,
     u32** allowed_irq_lines, size_t* allowed_irq_lines_count, struct mmap_region** allowed_mmap_regions,
-    size_t* allowed_mmap_regions_count, struct devio_region** allowed_devio_regions,
-    size_t* allowed_devio_regions_count) {
+    size_t* allowed_mmap_regions_count, struct port_io_region** allowed_port_io_regions,
+    size_t* allowed_port_io_regions_count) {
     int ret = build_and_add_permission_entry(list_head, *path, *allowed_irq_lines, *allowed_irq_lines_count,
-        *allowed_mmap_regions, *allowed_mmap_regions_count, *allowed_devio_regions, *allowed_devio_regions_count);
+        *allowed_mmap_regions, *allowed_mmap_regions_count, *allowed_port_io_regions, *allowed_port_io_regions_count);
     if (ret != 0) {
         return ret;
     }
@@ -171,15 +171,15 @@ static int finish_current_entry_and_reset_(enum permtab_parse_state* state, stru
     *allowed_irq_lines_count = 0;
     *allowed_mmap_regions = NULL;
     *allowed_mmap_regions_count = 0;
-    *allowed_devio_regions = NULL;
-    *allowed_devio_regions_count = 0;
+    *allowed_port_io_regions = NULL;
+    *allowed_port_io_regions_count = 0;
 
     return 0;
 }
 
 #define finish_current_entry_and_reset()                                                                               \
     finish_current_entry_and_reset_(&state, &new_permission_list, &path, &allowed_irq_lines, &allowed_irq_lines_count, \
-        &allowed_mmap_regions, &allowed_mmap_regions_count, &allowed_devio_regions, &allowed_devio_regions_count)
+        &allowed_mmap_regions, &allowed_mmap_regions_count, &allowed_port_io_regions, &allowed_port_io_regions_count)
 
 static inline bool is_whitespace(char c) {
     return c == ' ' || c == '\t';
@@ -203,8 +203,8 @@ static ssize_t permtab_write(struct file* file __attribute__((unused)), const ch
     size_t allowed_irq_lines_count = 0;
     struct mmap_region* allowed_mmap_regions = NULL;
     size_t allowed_mmap_regions_count = 0;
-    struct devio_region* allowed_devio_regions = NULL;
-    size_t allowed_devio_regions_count = 0;
+    struct port_io_region* allowed_port_io_regions = NULL;
+    size_t allowed_port_io_regions_count = 0;
 
     permtab_text = kzalloc(count, GFP_KERNEL);
     if (permtab_text == NULL) {
@@ -571,16 +571,16 @@ static ssize_t permtab_write(struct file* file __attribute__((unused)), const ch
                         goto fail;
                     }
 
-                    allowed_devio_regions_count++;
-                    struct devio_region* new_allowed_devio_regions = krealloc_array(
-                        allowed_devio_regions, allowed_devio_regions_count, sizeof(struct devio_region), GFP_KERNEL);
-                    if (new_allowed_devio_regions == NULL) {
+                    allowed_port_io_regions_count++;
+                    struct port_io_region* new_allowed_port_io_regions = krealloc_array(allowed_port_io_regions,
+                        allowed_port_io_regions_count, sizeof(struct port_io_region), GFP_KERNEL);
+                    if (new_allowed_port_io_regions == NULL) {
                         ret = -ENOMEM;
                         goto fail;
                     }
-                    allowed_devio_regions = new_allowed_devio_regions;
-                    allowed_devio_regions[allowed_devio_regions_count - 1].start = io_port_start;
-                    allowed_devio_regions[allowed_devio_regions_count - 1].size = io_port_end - io_port_start;
+                    allowed_port_io_regions = new_allowed_port_io_regions;
+                    allowed_port_io_regions[allowed_port_io_regions_count - 1].start = io_port_start;
+                    allowed_port_io_regions[allowed_port_io_regions_count - 1].size = io_port_end - io_port_start;
 
                     if (c == ',') {
                         buffer_content_len = 0;
@@ -646,7 +646,7 @@ fail:
     list_for_each_entry_safe(entry, next, &new_permission_list, list) {
         remove_permission_entry(entry);
     }
-    kfree(allowed_devio_regions);
+    kfree(allowed_port_io_regions);
     kfree(allowed_mmap_regions);
     kfree(allowed_irq_lines);
     kfree(path);

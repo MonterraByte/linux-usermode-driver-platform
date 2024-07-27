@@ -350,7 +350,7 @@ struct client_info {
     u32* registered_irqs;
     size_t registered_irqs_count;
 
-    struct devio_region* requested_port_io_regions;
+    struct port_io_region* requested_port_io_regions;
     size_t requested_port_io_regions_count;
 };
 static LIST_HEAD(client_info_list);
@@ -400,7 +400,7 @@ static bool register_client_if_not_registered(u32 port_id, struct pid* pid) {
 }
 
 static bool client_info_is_subscribed_to_irq(struct client_info* info, u32 irq);
-static bool client_info_requested_port_region(struct client_info* info, struct devio_region region);
+static bool client_info_requested_port_region(struct client_info* info, struct port_io_region region);
 
 /// Removes a `struct client_info` from the list it's contained in, and releases its resources
 ///
@@ -430,7 +430,7 @@ static void remove_client(struct client_info* p) {
     kfree(p->registered_irqs);
 
     for (size_t i = 0; i < p->requested_port_io_regions_count; i++) {
-        struct devio_region region = p->requested_port_io_regions[i];
+        struct port_io_region region = p->requested_port_io_regions[i];
 
         bool requested_by_another_client = false;
         struct client_info* other;
@@ -771,7 +771,7 @@ static int umdp_devio_write(struct sk_buff* skb, struct genl_info* info) {
     return -EINVAL;
 }
 
-static bool client_info_requested_port_region(struct client_info* info, struct devio_region region) {
+static bool client_info_requested_port_region(struct client_info* info, struct port_io_region region) {
     for (size_t i = 0; i < info->requested_port_io_regions_count; i++) {
         if (info->requested_port_io_regions[i].start == region.start
             && info->requested_port_io_regions[i].size == region.size) {
@@ -789,7 +789,7 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
         printk(KERN_ERR "umdp: invalid IO region request\n");
         return -EINVAL;
     }
-    struct devio_region region = {
+    struct port_io_region region = {
         .start = *((u64*) nla_data(start_attr)),
         .size = *((u64*) nla_data(size_attr)),
     };
@@ -832,8 +832,8 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
         return -EPERM;
     }
 
-    struct devio_region* new_regions = krealloc_array(this_client_info->requested_port_io_regions,
-        this_client_info->requested_port_io_regions_count + 1, sizeof(struct devio_region), GFP_KERNEL);
+    struct port_io_region* new_regions = krealloc_array(this_client_info->requested_port_io_regions,
+        this_client_info->requested_port_io_regions_count + 1, sizeof(struct port_io_region), GFP_KERNEL);
     if (new_regions == NULL) {
         up_write(&client_info_lock);
         printk(KERN_ERR "umdp: failed to resize I/O port region array\n");
@@ -877,7 +877,7 @@ static int umdp_devio_release(struct sk_buff* skb, struct genl_info* info) {
         printk(KERN_ERR "umdp: invalid IO region release request\n");
         return -EINVAL;
     }
-    struct devio_region region = {
+    struct port_io_region region = {
         .start = *((u64*) nla_data(start_attr)),
         .size = *((u64*) nla_data(size_attr)),
     };
