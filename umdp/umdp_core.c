@@ -798,6 +798,12 @@ static int umdp_devio_request(struct sk_buff* skb, struct genl_info* info) {
         printk(KERN_ERR "umdp: I/O regions cannot have size 0\n");
         return -EINVAL;
     }
+    u64 region_end = region.start + (region.size - 1u);
+    if (region_end < region.start) {
+        // integer overflow
+        printk(KERN_INFO "umdp: I/O region request has invalid range, refusing request\n");
+        return -EINVAL;
+    }
 
     down_write(&client_info_lock);
 
