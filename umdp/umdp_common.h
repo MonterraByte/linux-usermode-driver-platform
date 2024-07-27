@@ -7,8 +7,8 @@ struct port_io_region {
 };
 
 struct mmap_region {
-    unsigned long start;
-    unsigned long size;
+    unsigned long start;  // inclusive
+    unsigned long end;  // exclusive
 };
 
 #endif  // UMDP_COMMON_H

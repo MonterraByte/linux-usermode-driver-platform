@@ -108,7 +108,7 @@ static int permtab_show(struct seq_file* s, void* data __attribute__((unused))) 
         if (entry->allowed_mmap_regions_count > 0) {
             for (i = 0; i < entry->allowed_mmap_regions_count; i++) {
                 seq_printf(s, i == 0 ? "0x%lx-0x%lx" : ",0x%lx-0x%lx", entry->allowed_mmap_regions[i].start,
-                    entry->allowed_mmap_regions[i].start + entry->allowed_mmap_regions[i].size);
+                    entry->allowed_mmap_regions[i].end);
             }
         } else {
             seq_puts(s, "none");
@@ -483,7 +483,7 @@ static ssize_t permtab_write(struct file* file __attribute__((unused)), const ch
                     }
                     allowed_mmap_regions = new_allowed_mmap_regions;
                     allowed_mmap_regions[allowed_mmap_regions_count - 1].start = mmap_start;
-                    allowed_mmap_regions[allowed_mmap_regions_count - 1].size = mmap_end - mmap_start;
+                    allowed_mmap_regions[allowed_mmap_regions_count - 1].end = mmap_end;
 
                     if (c == ',') {
                         buffer_content_len = 0;
