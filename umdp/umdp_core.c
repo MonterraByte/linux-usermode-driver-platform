@@ -455,6 +455,7 @@ static void remove_client(struct client_info* p) {
 
 // client_info_list write lock must be acquired when calling this
 static void remove_client_with_pid(struct pid* pid) {
+    // A process can have multiple Netlink sockets, so there may be more than one `struct client_info`.
     struct client_info* p;
     struct client_info* next;
     for_each_client_info_safe(p, next) {
