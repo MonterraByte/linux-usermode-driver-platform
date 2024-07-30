@@ -1277,6 +1277,12 @@ static int umdp_init(void) {
     }
 
     ih_workqueue = alloc_workqueue("umdp_interrupt_wq", 0, 0);
+    if (ih_workqueue == NULL) {
+        ret = -ENOMEM;
+        printk(KERN_ERR "umdp: failed to allocate workqueue for interrupt handling");
+        goto fail_after_device_create;
+    }
+
     size_t i;
     for (i = 0; i < UMDP_WORKER_COUNT; i++) {
         ih_workers[i].busy = false;
@@ -1308,6 +1314,7 @@ fail_after_kprobe_register:
     if (kprobe_registered) {
         unregister_kprobe(&do_exit_kp);
     }
+fail_after_device_create:
     device_destroy(umdp_mem_dev_class, umdp_mem_chrdev);
 fail_after_class_create:
     class_destroy(umdp_mem_dev_class);
