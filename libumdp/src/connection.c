@@ -117,3 +117,12 @@ int umdp_open_mem_if_unopened(umdp_connection* connection) {
 
     return 0;
 }
+
+void umdp_ensure_original_pid(umdp_connection* connection) {
+    if (getpid() != connection->owner_pid) {
+        print_err(
+            "tried to use a umdp_connection from a process other than the one that created it, which is not "
+            "allowed.\n");
+        abort();
+    }
+}

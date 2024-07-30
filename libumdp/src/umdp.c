@@ -140,6 +140,8 @@ void umdp_disconnect(umdp_connection* connection) {
 }
 
 static int umdp_devio_read(umdp_connection* connection, uint64_t port, uint8_t type, void* out) {
+    umdp_ensure_original_pid(connection);
+
     connection->received_devio_value.type = DEVIO_VALUE_NONE;
 
     struct nl_msg* msg =
@@ -223,6 +225,8 @@ int umdp_devio_read_u32(umdp_connection* connection, uint64_t port, uint32_t* ou
 }
 
 static int umdp_devio_write(umdp_connection* connection, uint64_t port, uint8_t type, void* value) {
+    umdp_ensure_original_pid(connection);
+
     int value_size;
     switch (type) {
         case UMDP_ATTR_DEVIO_WRITE_VALUE_U8:
@@ -308,6 +312,8 @@ int umdp_devio_write_u32(umdp_connection* connection, uint64_t port, uint32_t va
 }
 
 static int umdp_devio_region_request(umdp_connection* connection, uint64_t start, uint64_t size, uint8_t command) {
+    umdp_ensure_original_pid(connection);
+
     if (size == 0) {
         print_err("size cannot be 0\n");
         return EINVAL;
@@ -366,6 +372,8 @@ int umdp_devio_release(umdp_connection* connection, uint64_t start, uint64_t siz
 }
 
 static int umdp_interrupt_subscription_request(umdp_connection* connection, uint32_t irq, uint8_t command) {
+    umdp_ensure_original_pid(connection);
+
     struct nl_msg* msg = nlmsg_alloc_size(NLMSG_HDRLEN + GENL_HDRLEN + nla_total_size(sizeof(irq)));
     if (msg == NULL) {
         print_err("failed to allocate memory\n");
@@ -416,6 +424,8 @@ int umdp_interrupt_unsubscribe(umdp_connection* connection, uint32_t irq) {
 }
 
 int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out) {
+    umdp_ensure_original_pid(connection);
+
     if (connection->subscribed_irq_count == 0) {
         print_err("not subscribed to any IRQ lines");
         return ENOENT;
@@ -432,6 +442,8 @@ int umdp_receive_interrupt(umdp_connection* connection, uint32_t* out) {
 }
 
 int umdp_mmap_physical(umdp_connection* connection, off_t start, size_t size, void** out) {
+    umdp_ensure_original_pid(connection);
+
     if (out == NULL) {
         print_err("out parameter is NULL\n");
         return EINVAL;
