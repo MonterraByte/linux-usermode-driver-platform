@@ -29,7 +29,6 @@ MODULE_AUTHOR("Joaquim Monteiro <joaquim.monteiro@protonmail.com>");
 #define UMDP_GENL_INTERRUPT_MULTICAST_NAME "interrupt"
 
 #define UMDP_DEVICE_NAME "umdp"
-#define UMDP_WORKQUEUE_NAME "umdp_wq"
 #define UMDP_WORKER_COUNT 32
 
 /* commands */
@@ -1277,7 +1276,7 @@ static int umdp_init(void) {
         goto fail_after_class_create;
     }
 
-    ih_workqueue = alloc_workqueue(UMDP_WORKQUEUE_NAME, 0, 0);
+    ih_workqueue = alloc_workqueue("umdp_interrupt_wq", 0, 0);
     size_t i;
     for (i = 0; i < UMDP_WORKER_COUNT; i++) {
         ih_workers[i].busy = false;
