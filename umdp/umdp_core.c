@@ -452,7 +452,6 @@ static void remove_client(struct client_info* p) {
     put_pid(p->pid);
     kfree(p);
 }
-NOKPROBE_SYMBOL(remove_client);
 
 // client_info_list write lock must be acquired when calling this
 static void remove_client_with_pid(struct pid* pid) {
@@ -464,18 +463,34 @@ static void remove_client_with_pid(struct pid* pid) {
         }
     }
 }
-NOKPROBE_SYMBOL(remove_client_with_pid);
+
+static struct workqueue_struct* exit_cleanup_workqueue;
+struct exit_cleanup_work {
+    struct work_struct ws;
+    struct pid* pid;
+};
+
+static void exit_cleanup(struct work_struct* ws) {
+    struct exit_cleanup_work* work = container_of(ws, struct exit_cleanup_work, ws);
+
+    down_write(&client_info_lock);
+    remove_client_with_pid(work->pid);
+    up_write(&client_info_lock);
+
+    put_pid(work->pid);
+    kfree(work);
+}
 
 // This gets executed at the start of the `do_exit` kernel function, or, in other words, when a process exits.
 // We can look at its PID to figure out if it is one of our clients, and if so, we remove it and free its resources.
 static int do_exit_handler(struct kprobe* p __attribute__((unused)), struct pt_regs* regs __attribute__((unused))) {
-    struct pid* pid = get_task_pid(current, PIDTYPE_PID);
-
-    down_write(&client_info_lock);
-    remove_client_with_pid(pid);
-    up_write(&client_info_lock);
-
-    put_pid(pid);
+    // The process is exiting, so we're not allowed to sleep. Thus, we allocate using GFP_ATOMIC.
+    struct exit_cleanup_work* work = kmalloc(sizeof(struct exit_cleanup_work), GFP_ATOMIC);
+    if (work != NULL) {
+        INIT_WORK(&work->ws, exit_cleanup);
+        work->pid = get_task_pid(current, PIDTYPE_PID);
+        queue_work(exit_cleanup_workqueue, (struct work_struct*) work);
+    }
     return 0;
 }
 NOKPROBE_SYMBOL(do_exit_handler);
@@ -1288,17 +1303,29 @@ static int umdp_init(void) {
         ih_workers[i].busy = false;
     }
 
-    ret = register_kprobe(&do_exit_kp);
-    if (ret == -EOPNOTSUPP) {
-        printk(KERN_WARNING
-            "umdp: This kernel does not support kprobes (it was built with CONFIG_KPROBES=n), resources won't be freed "
-            "on process exit\n");
-    } else if (ret < 0) {
-        printk(KERN_WARNING
-            "umdp: Failed to register kprobe (error code %d), resources won't be freed on process exit\n",
-            -ret);
+    // Since the cleanup task needs a write lock, there's no point in executing more than one task at once.
+    // As such, we use an unbound workqueue with max_active set to 1.
+    exit_cleanup_workqueue = alloc_workqueue("umdp_exit_cleanup_wq", WQ_UNBOUND, 1);
+    if (exit_cleanup_workqueue != NULL) {
+        ret = register_kprobe(&do_exit_kp);
+        if (ret == 0) {
+            kprobe_registered = true;
+        } else {
+            destroy_workqueue(exit_cleanup_workqueue);
+            exit_cleanup_workqueue = NULL;
+            if (ret == -EOPNOTSUPP) {
+                printk(KERN_WARNING
+                    "umdp: This kernel does not support kprobes (it was built with CONFIG_KPROBES=n), resources won't "
+                    "be freed on process exit\n");
+            } else {
+                printk(KERN_WARNING
+                    "umdp: Failed to register kprobe (error code %d), resources won't be freed on process exit\n",
+                    -ret);
+            }
+            ret = 0;
+        }
     } else {
-        kprobe_registered = true;
+        printk(KERN_WARNING "umdp: failed to allocate workqueue, resources won't be freed on process exit");
     }
 
     ret = genl_register_family(&umdp_genl_family);
@@ -1337,6 +1364,7 @@ static void umdp_exit(void) {
 
     if (kprobe_registered) {
         unregister_kprobe(&do_exit_kp);
+        destroy_workqueue(exit_cleanup_workqueue);
     }
 
     destroy_workqueue(ih_workqueue);
